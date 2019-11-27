@@ -1,5 +1,4 @@
-Add LoadPath "..".
-Declare ML Module "relation_extraction_plugin".
+Require Import RelationExtraction.
 
 Inductive n : Set := | Zero : n | Succ : n -> n.
 Inductive add : n -> n -> n -> Prop :=

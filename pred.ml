@@ -770,7 +770,7 @@ let check_insertable nt tnl = match tnl with
     | _ -> false
 
 (* insert the tree output (the last node) of a property *)
-let rec insert_output env id_spec pm_n kv nt prop tnl = 
+let insert_output env id_spec pm_n kv nt prop tnl =
   if not (check_insertable nt tnl)
   then [] (* check logical terms compatibility *)
   else 
@@ -801,7 +801,7 @@ then
 else []
 
 (* insert the last premisse of a property in a tree *)
-let rec insert_last_prem_term env id_spec pm_n kv nt prop tnl = 
+let insert_last_prem_term env id_spec pm_n kv nt prop tnl =
   insert_output env id_spec pm_n kv nt prop tnl
 
 let rec insertion_recursor env id_spec prem_selector pm_n prop kv nt tnl = 

@@ -2,7 +2,7 @@ import sys
 from subprocess import call
 
 for f in sys.argv[2:]:
-    ret = call([sys.argv[1], f])
+    ret = call([sys.argv[1], "-I", "..", "-R", "..", "RelationExtraction", f])
     if ret == 0:
         print "Extraction to Coq (%s): SUCCESS." % f
     else:

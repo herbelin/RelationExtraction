@@ -1,7 +1,4 @@
-Add LoadPath "..".
-Declare ML Module "relation_extraction_plugin".
-
-
+Require Import RelationExtraction.
 
 
 Inductive ident : Set :=

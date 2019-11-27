@@ -59,5 +59,5 @@ let res =
       (Tuples.VZero, Tuples.Env 
         (Tuples.A, (Tuples.VSucc Tuples.VZero), Tuples.EnvEmpty))); 
 
-    Printf.printf "test OK !\n"
+    Printf.printf "test OK!\n"
 in test_func ()

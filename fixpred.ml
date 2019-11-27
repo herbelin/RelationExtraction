@@ -22,11 +22,11 @@
 
 open Pred
 open Coq_stuff
-open Host_stuff
 open Minimlgen
 open Proof_scheme
 
 open Term
+open Constr
 open Names
 open Declarations
 open Util
@@ -66,7 +66,7 @@ let rec rename_var_term oi ni (t, ty) = match t with
   | MLTMatch (t, an, ptl) -> MLTMatch (rename_var_term oi ni t, an,
     List.map (fun (p,t,an) -> 
       rename_var_pattern oi ni p, rename_var_term oi ni t, an) ptl), ty
-  | MLTALin _ -> anomalylabstrm "RelationExtraction" (str "Not implanted yet")
+  | MLTALin _ -> CErrors.anomaly ~label:"RelationExtraction" (str "Not implanted yet")
   | _ -> t, ty
 
 (* Extracts the first column of a patterns matrix. *)
@@ -103,7 +103,7 @@ let rec normalize_pltl_tuples tl pltl = match tl with
  After normalization, each row must have the same number of pattern as tl 
  and must not contain any tuple. 
  If there is a default case, it is removed. *)
-let rec normalize_pltl tl pltl =
+let normalize_pltl tl pltl =
   let npltl = List.filter (fun (pl, t, an) ->
     List.for_all (function MLPWild, _ -> false | _ -> true) pl
   ) pltl in
@@ -125,16 +125,16 @@ let rec make_wild_pats env n =
   if n = 0 then [] else (fake_type env MLPWild) :: (make_wild_pats env (n-1))
 
 (* Gets the type from a product. *)
-let typ_from_named env ind (_,c) = match kind_of_term c with
-  | Ind ind ->
+let typ_from_named env ind (_,c) = match Constr.kind c with
+  | Ind (ind, _) ->
     let _,idc = Inductive.lookup_mind_specif (Global.env ()) ind in
     CTSum (List.map (fun cstr_id  -> 
-      (ident_of_string (string_of_id cstr_id))
+      (ident_of_string (Id.to_string cstr_id))
     ) (Array.to_list idc.mind_consnames)), Some c (* c is the type of idc *)
   | Rel _ -> let ty = mkInd ind in
     let _,oib = Inductive.lookup_mind_specif (Global.env ()) ind in
     CTSum (List.map (fun cstr_id  -> 
-      (ident_of_string (string_of_id cstr_id))
+      (ident_of_string (Id.to_string cstr_id))
     ) (Array.to_list oib.mind_consnames)), Some ty
   | _ -> unknown_type env
 
@@ -146,14 +146,14 @@ let rec filter2 p l1 l2 = match l1, l2 with
   | _ -> l2
 
 (* Finds the Coq type of constr *)
-let coq_type_explorer env cstr = match kind_of_term cstr with
-  | Construct (ind, i) ->
+let coq_type_explorer env cstr = match Constr.kind cstr with
+  | Construct ((ind, i), _) ->
     let mib,oib = Inductive.lookup_mind_specif (Global.env ()) ind in
     let (n, _) = decompose_prod oib.mind_user_lc.(i-1) in
     let n = List.map (typ_from_named env ind) (List.rev n) in
 (*basic imp args filter, TODO: unification with the host2spec algorithm ?*)
     let imp = match Impargs.implicits_of_global (
-        Libnames.global_of_constr cstr) with
+        Globnames.global_of_constr cstr) with
       | (_,a)::_ -> a
       | _ -> [] in
     let filter = fun a -> not (Impargs.is_status_implicit a) in
@@ -164,12 +164,13 @@ let coq_type_explorer env cstr = match kind_of_term cstr with
   | _ -> assert false
 
 (* Finds the list of constructors of a coq inductive type. *)
-let clear_type_from_coq typ = match kind_of_term typ with
-  | Ind ind -> 
+let _clear_type_from_coq typ = match Constr.kind typ with
+  | Ind (ind, _) ->
     let _,oib = Inductive.lookup_mind_specif (Global.env ()) ind in
-    let cstrs_names = List.map (fun n -> ident_of_string (string_of_id n))
+    let cstrs_names = List.map (fun n -> ident_of_string (Id.to_string n))
       (Array.to_list oib.mind_consnames) in
     CTSum cstrs_names
+  | _ -> assert false (* ?? *)
 
 (* Gets the arity and types of the arguments of a constructor by searching it 
  in the first column of a patterns matrix. 
@@ -180,7 +181,7 @@ let rec get_cstr_arity_and_types env cstr pltl = match pltl with
   | [] -> let cstr = try List.assoc cstr env.extr_henv.cstrs with Not_found -> 
       try find_coq_constr_i cstr with Not_found -> (*TODO:this line is a 
                                          temporary fix for bst in full mode *)
-      anomalylabstrm "RelationExtraction" 
+      CErrors.anomaly ~label:"RelationExtraction"
       (str ("Cannot find the '" ^ string_of_ident cstr ^ 
             "' constructor in the extraction environment")) in
     coq_type_explorer env cstr
@@ -211,6 +212,7 @@ let rec compile_fix_match comp (env, id_fun) binded_vars tl pltl = match tl with
              (* This happens in the relaxed extraction, we keep only the first
                 output term. Most general pattens are always placed after. *)
           build_fix_term comp (env, id_fun) binded_vars t
+    | _ -> assert false (* ?? *)
   end
   | (mt, ((CTSum cstr_list, _) as mt_ty))::tl_tail ->
     (* match mt with the first pattern of every pl present in pltl *)
@@ -222,7 +224,6 @@ let rec compile_fix_match comp (env, id_fun) binded_vars tl pltl = match tl with
     let is_constrs = List.exists (fun (pl, _, _) -> match pl with 
       | p::_ -> (match p with | MLPConstr _, _ -> true | _ -> false)
       | _ -> assert false) pltl in
-    let an = flatmap (fun (_, _, an) -> an) pltl in
     let nmt, lams, npltl = if is_variables then 
         let nvar = ident_of_string (fresh_string_id "fix_" ()) in
         (* if there is at least one variable: we create a variable for 
@@ -246,7 +247,7 @@ let rec compile_fix_match comp (env, id_fun) binded_vars tl pltl = match tl with
       | _ -> []
     ) pltl in
     let anwild = flatmap (fun (pl, _, an) -> match pl with
-      | (MLPWild _, _)::_ -> an
+      | (MLPWild, _)::_ -> an
       | _ -> []
     ) pltl in
     let ancstrs = flatmap (fun (pl, _, an) -> match pl with
@@ -306,7 +307,7 @@ let rec compile_fix_match comp (env, id_fun) binded_vars tl pltl = match tl with
         FixLetin (i, l, t, anlams), (CTNone, None)) lams nterm
 
 
-  | (mt, ((_, _) ))::_ -> anomalylabstrm "RelationExtraction"
+  | (mt, ((_, _) ))::_ -> CErrors.anomaly ~label:"RelationExtraction"
                                  (str "Missing type information")
 
 
@@ -327,7 +328,7 @@ and build_fix_term c (env, id_fun) binded_vars (t,ty) = match t with
     let tl, pltl = normalize_pltl 
       [t] (List.map (fun (p, t, an) -> [p], t, an) ptl) in
     compile_fix_match c (env, id_fun) binded_vars tl pltl
-  | MLTALin _ -> anomalylabstrm "RelationExtraction" (str "Not implanted yet")
+  | MLTALin _ -> CErrors.anomaly ~label:"RelationExtraction" (str "Not implanted yet")
   | MLTATrue -> FixTrue, ty
   | MLTAFalse -> FixFalse, ty
   | MLTANone -> FixNone, ty
@@ -336,7 +337,7 @@ and build_fix_term c (env, id_fun) binded_vars (t,ty) = match t with
     if is_full_extraction (List.hd (extr_get_modes env id_fun)) then 
       fake_type env FixFalse
     else fake_type env FixNone
-  | _ -> anomalylabstrm "RelationExtraction" (str "Not implanted yet")
+  | _ -> CErrors.anomaly ~label:"RelationExtraction" (str "Not implanted yet")
 
 
 (* Transform added pattern constrs (the ones with an A) to basic pattern
@@ -347,11 +348,11 @@ let rec transform_pat_constrs (lpat, ty) = match lpat with
   | MLPConstr (i, pl) -> MLPConstr (i, transform_pat_constrs_list pl), ty
   | MLPATrue -> MLPConstr (ident_of_string "true", []), 
     (CTSum [ident_of_string "true";ident_of_string "false"], 
-     Some (constr_of_global 
+     Some (UnivGen.constr_of_global
        (locate (qualid_of_string "Coq.Init.Datatypes.bool"))))
   | MLPAFalse -> MLPConstr (ident_of_string "false", []), 
     (CTSum [ident_of_string "true";ident_of_string "false"], 
-      Some (constr_of_global
+      Some (UnivGen.constr_of_global
         (locate (qualid_of_string "Coq.Init.Datatypes.bool"))))
   | MLPASome p -> 
     MLPConstr (ident_of_string "Some", [transform_pat_constrs p]), ty
@@ -372,11 +373,11 @@ let rec transform_constrs (lterm, ty) = match lterm with
       transform_pat_constrs p, transform_constrs t, an) ptl), ty
   | MLTATrue -> MLTConstr (ident_of_string "true", []), 
     (CTSum [ident_of_string "true";ident_of_string "false"], 
-      Some (constr_of_global 
+      Some (UnivGen.constr_of_global
         (locate (qualid_of_string "Coq.Init.Datatypes.bool"))))
   | MLTAFalse -> MLTConstr (ident_of_string "false", []), 
     (CTSum [ident_of_string "true";ident_of_string "false"], 
-      Some (constr_of_global
+      Some (UnivGen.constr_of_global
         (locate (qualid_of_string "Coq.Init.Datatypes.bool"))))
   | MLTASome t -> MLTConstr (ident_of_string "Some", [transform_constrs t]), ty
   | MLTANone -> MLTConstr (ident_of_string "None", []), ty
@@ -386,13 +387,13 @@ and transform_constrs_list lterm_list =
 
 (* We must add this constructors: true, false, Some, None *)
 let add_standard_constr_to_spec env = 
-  let true_cstr = constr_of_global
+  let true_cstr = UnivGen.constr_of_global
     (locate (qualid_of_string "Coq.Init.Datatypes.true"))
-  and false_cstr = constr_of_global
+  and false_cstr = UnivGen.constr_of_global
     (locate (qualid_of_string "Coq.Init.Datatypes.false"))
-  and some_cstr = constr_of_global
+  and some_cstr = UnivGen.constr_of_global
     (locate (qualid_of_string "Coq.Init.Datatypes.Some"))
-  and none_cstr = constr_of_global
+  and none_cstr = UnivGen.constr_of_global
     (locate (qualid_of_string "Coq.Init.Datatypes.None"))
   in 
 let henv = { env.extr_henv with cstrs =
@@ -402,12 +403,12 @@ let henv = { env.extr_henv with cstrs =
   { env with extr_henv = henv }
 
 (* Change the type of incomplete function with the option type. *)
-let rec complete_fun_with_option env f = 
+let complete_fun_with_option env f =
   let rec cfwo_rec (lterm, ty) = match lterm with
     | MLTVar _ | MLTTuple _ | MLTRecord _ | MLTConstr _ | MLTConst _ | MLTFun _ 
     | MLTFunNot _ | MLTATrue | MLTAFalse | MLTASome _ | MLTANone -> 
       if fix_get_completion_status env f.mlfun_name then
-        let opt = constr_of_global 
+        let opt = UnivGen.constr_of_global
           (locate (qualid_of_string "Coq.Init.Datatypes.option")) in
         match ty with
         | _, Some ctyp ->
@@ -420,7 +421,7 @@ let rec complete_fun_with_option env f =
     | MLTMatch ((MLTFun(i,args,m), (_,Some ctyp)), an, ptl) 
     when fix_get_completion_status env i -> 
 
-     let opt = constr_of_global 
+     let opt = UnivGen.constr_of_global
        (locate (qualid_of_string "Coq.Init.Datatypes.option")) in
      let ctyp = Some (mkApp (opt, [|ctyp|])) in
      let typ = (CTSum [ident_of_string "Some";ident_of_string "None"], ctyp) in
@@ -435,12 +436,12 @@ let rec complete_fun_with_option env f =
   {f with mlfun_body = cfwo_rec f.mlfun_body}
 
 (* Generates a Coq natural number. *)
-let rec gen_coq_nat n = if n = 0 then 
-    constr_of_global (locate (qualid_of_string "Coq.Init.Datatypes.O"))
+let rec _gen_coq_nat n = if n = 0 then
+    UnivGen.constr_of_global (locate (qualid_of_string "Coq.Init.Datatypes.O"))
   else
-    let s = constr_of_global 
+    let s = UnivGen.constr_of_global
       (locate (qualid_of_string "Coq.Init.Datatypes.S")) in
-    mkApp (s, [|gen_coq_nat (n-1)|])
+    mkApp (s, [|_gen_coq_nat (n-1)|])
 
 (* Add a counter for FixCount recursion style in an ml function. *)
 (* The ml function must already have been completed with option type
@@ -448,7 +449,7 @@ let rec gen_coq_nat n = if n = 0 then
 let add_ml_counter env f = 
   let fname = f.mlfun_name in
   let (mlt, typ) = f.mlfun_body in
-  let coq_nat = Some (constr_of_global 
+  let coq_nat = Some (UnivGen.constr_of_global
       (locate (qualid_of_string "Coq.Init.Datatypes.nat"))) in
   let nat_typ = CTSum [ident_of_string "O"; ident_of_string "S"], coq_nat in
   let fcount = MLTVar (ident_of_string "fcounter"), nat_typ in
@@ -582,7 +583,7 @@ let build_proof_scheme fixfun =
   let rec rec_ps (ft, (ty, cty)) an = match ft with
     | FixCase (t, anmatch, iltl) -> let cstr_list = match t with
         | (_, (CTSum cl, _)) -> List.map string_of_ident cl
-        | _ -> anomalylabstrm "RelationExtraction" 
+        | _ -> CErrors.anomaly ~label:"RelationExtraction"
                  (str "Missing type information") in
       List.flatten (List.map2 (fun (il, next_t, anpat) cstr ->
         let pall = rec_ps next_t anpat in
@@ -609,7 +610,6 @@ let build_proof_scheme fixfun =
       | ({pa_prop_name = pn; pa_renamings = _})::_ -> 
         (* a list with more than one element can occur in relaxed extraction *)
         [Some pn, [OutputTerm (Some (ft, (ty, cty))), None]]
-      | _ -> assert false
     end in
   let pall = rec_ps fixfun.fixfun_body [] in
   let branches = List.map (fun (p, al) -> let p = match p with

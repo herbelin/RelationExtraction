@@ -27,25 +27,25 @@ val extraction_print : string -> unit
 
 (* Extraction of one relation (or mutually recursive relations). *)
 val relation_extraction_single :
- (string option * Libnames.reference * int list * recursion_style option) list
+ (string option * Libnames.qualid * int list * recursion_style option) list
  -> unit
 val relation_extraction :
-(string option * Libnames.reference * int list * recursion_style option) list
+(string option * Libnames.qualid * int list * recursion_style option) list
 -> unit
 
 (* Extraction of one relation from a non deterministic specification. *)
 val relation_extraction_single_order :
-(string option * Libnames.reference * int list * recursion_style option) list
+(string option * Libnames.qualid * int list * recursion_style option) list
 -> unit
 val relation_extraction_order :
-(string option * Libnames.reference * int list * recursion_style option) list
+(string option * Libnames.qualid * int list * recursion_style option) list
 -> unit
 
 (* Extraction of one or more relations into Fixpoints. *)
 val relation_extraction_fixpoint :
-(string option * Libnames.reference * int list * recursion_style option) list
+(string option * Libnames.qualid * int list * recursion_style option) list
 -> unit
 
 val relation_extraction_fixpoint_order :
-(string option * Libnames.reference * int list * recursion_style option) list
+(string option * Libnames.qualid * int list * recursion_style option) list
 -> unit

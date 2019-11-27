@@ -24,12 +24,11 @@ open Util
 open Pp
 open Declarations
 open Term
+open Constr
 open Names
 open Libnames
 open Nametab
-open Inductive
 open Pred
-open Host_stuff
 open Coq_stuff
 
 (* TODO:
@@ -52,45 +51,45 @@ let add_cstr_to_env env id cstr =
 (* Gets the identifier of a binder *)
 let get_name = function
   | (Name id, _) -> id
-  | _ -> anomalylabstrm "RelationExtraction"
+  | _ -> CErrors.anomaly ~label:"RelationExtraction"
                         (str "Cannot find the name of a binder")
 
 (* Finds a list of the constructors of an inductive type. *)
 let find_it_constrs constr = 
-  let ind, i = destConstruct constr in
+  let (ind, i), univ = destConstruct constr in
   let _,idc = Inductive.lookup_mind_specif (Global.env ()) ind in
   List.map (fun cstr_id  -> 
-    ident_of_string (string_of_id cstr_id)
+    ident_of_string (Id.to_string cstr_id)
   ) (Array.to_list idc.mind_consnames)
 
 (* Gets type of one inductive body. *)
 let get_prod_type_from_oib oib =
   match oib.mind_arity with
-      | Monomorphic a -> a.mind_user_arity
-      | _ -> errorlabstrm "RelationExtraction" (str "Non monomorphic arity")
+      | RegularArity a -> a.mind_user_arity
+      | _ -> CErrors.user_err ~hdr:"RelationExtraction" (str "Non monomorphic arity")
 
 (* TODO: make compatibility with mutual inductives (see the <Rel _> case) *)
 (* Finds type of a constructor. For each argument of this constructor:
      - the list of constructors of the argument type.
      - the argument type itself. *)
-let find_types_of_constr constr = match kind_of_term constr with
-  | Construct (ind, i) -> 
+let find_types_of_constr constr = match Constr.kind constr with
+  | Construct ((ind, i), _) ->
     let mib, oib = Inductive.lookup_mind_specif (Global.env ()) ind in
     let (n, _) = decompose_prod oib.mind_user_lc.(i-1) in
-    List.map (fun (_, c) -> match kind_of_term c with
-      | Ind ind ->
+    List.map (fun (_, c) -> match Constr.kind c with
+      | Ind (ind, _) ->
         let _, oib = Inductive.lookup_mind_specif (Global.env ()) ind in
         CTSum (List.map (fun cstr_id  -> 
-          (ident_of_string (string_of_id cstr_id))
+          (ident_of_string (Id.to_string cstr_id))
         ) (Array.to_list oib.mind_consnames)), Some c
       | Rel _ -> let ty = mkInd ind in
         let _, oib = Inductive.lookup_mind_specif (Global.env ()) ind in
         CTSum (List.map (fun cstr_id  -> 
-          (ident_of_string (string_of_id cstr_id))
+          (ident_of_string (Id.to_string cstr_id))
         ) (Array.to_list oib.mind_consnames)), Some ty
       | _ -> CTNone, Some c
     ) (List.rev n)
-  | _ -> anomalylabstrm "RelationExtraction" (str "Constructor type not found")
+  | _ -> CErrors.anomaly ~label:"RelationExtraction" (str "Constructor type not found")
 
 (* TODO: make compatibility with mutual inductives (see the <Rel _> case) *)
 (* Finds type of an inductive arguments. For each argument:
@@ -99,16 +98,16 @@ let find_types_of_constr constr = match kind_of_term constr with
 let find_types_of_ind ind = 
   let _, oib = Inductive.lookup_mind_specif (Global.env ()) ind in
   let (n, _) = decompose_prod (get_prod_type_from_oib oib) in
-    List.map (fun (_, c) -> match kind_of_term c with
-      | Ind ind ->
+    List.map (fun (_, c) -> match Constr.kind c with
+      | Ind (ind, _) ->
         let _, oib = Inductive.lookup_mind_specif (Global.env ()) ind in
         CTSum (List.map (fun cstr_id  -> 
-          (ident_of_string (string_of_id cstr_id))
+          (ident_of_string (Id.to_string cstr_id))
         ) (Array.to_list oib.mind_consnames)), Some c
       | Rel _ -> let ty = mkInd ind in
         let _, oib = Inductive.lookup_mind_specif (Global.env ()) ind in
         CTSum (List.map (fun cstr_id  -> 
-          (ident_of_string (string_of_id cstr_id))
+          (ident_of_string (Id.to_string cstr_id))
         ) (Array.to_list oib.mind_consnames)), Some ty
       | _ -> CTNone, Some c
     ) (List.rev n)
@@ -134,11 +133,11 @@ let rec map_filter f l = match l with
    h and args must come from a constr of the form App(h, args).
    When typs is not known, the function can be called with h args args. *)
 let filter_impargs_cstr h args typs =
-  let imp = match Impargs.implicits_of_global (global_of_constr h) with
+  let imp = match Impargs.implicits_of_global (Globnames.global_of_constr h) with
     | (_,a)::_ -> a
     | _ -> [] in
   let filter = fun a -> not (Impargs.is_status_implicit a) in
-  let rec terms_filter term typ = match kind_of_term term with
+  let rec terms_filter term typ = match Constr.kind term with
     | Ind _ -> false
     | App (h, _) -> terms_filter h typ
     | _ -> true in
@@ -151,17 +150,17 @@ let filter_impargs_cstr h args typs =
 
 (* Parses a simple Coq term. *)
 let rec build_untyped_term (env, id_spec) prod term = 
-match kind_of_term term with
-  | Const c -> let i = ident_of_string (string_of_con c) in
+match Constr.kind term with
+  | Const (c,_) -> let i = ident_of_string (Constant.to_string c) in
     let env = add_cstr_to_env env i term in
     MLTConst i, env
   | Rel i -> let n = 
-    ident_of_string (string_of_id (get_name (List.nth prod (i-1)))) in
+    ident_of_string (Id.to_string (get_name (List.nth prod (i-1)))) in
     MLTVar n, env
   | App (h, args) when isConstruct h ->
     let typs = find_types_of_constr h in
     let args, typs = filter_impargs_cstr h args typs in
-    let _, i = destConstruct h in
+    let (_, i), _ = destConstruct h in
     let it_constrs = find_it_constrs h in
     let constr = List.nth it_constrs (i-1) in
     let args, env = List.fold_right2 (fun t a (args, env) ->
@@ -170,7 +169,7 @@ match kind_of_term term with
     let env = add_cstr_to_env env constr h in
     MLTConstr (constr, args), env
   | Construct _ ->
-    let ind, i = destConstruct term in
+    let (ind, i), _ = destConstruct term in
     let it_constrs = find_it_constrs term in
     let constr = List.nth it_constrs (i-1) in
     (* Add all the constructors to env. *)
@@ -182,15 +181,15 @@ match kind_of_term term with
     MLTConstr (constr, []), env
   | App (h, args) -> 
     let args, _ = filter_impargs_cstr h args (Array.to_list args) in
-    let c = destConst h in
-    let n = con_label c in
-    let s = ident_of_string (string_of_label n) in
+    let c, _ = destConst h in
+    let n = Constant.label c in
+    let s = ident_of_string (Label.to_string n) in
     let args, inf = List.fold_right (fun a (args, env) ->
       let a, env = build_term (env, id_spec) prod None a in
       a::args, env) (Array.to_list args) ([], env) in
     let env = add_cstr_to_env env s h in
     MLTFun (s, args, None), env
-  | _ -> anomalylabstrm "RelationExtraction" (str "Unknown Coq construction")
+  | _ -> CErrors.anomaly ~label:"RelationExtraction" (str "Unknown Coq construction")
 and build_term (env, id_spec) prod typ term = 
   let (t, env) = build_untyped_term (env, id_spec) prod term in
   match typ with
@@ -205,10 +204,10 @@ let rec filter_mode_skip mode args = match (mode, args) with
 
 
 (* Parses the conclusion of a predicate's constructor (or property). *)
-let build_concl (env, id_spec) named_prod term = match kind_of_term term with
+let build_concl (env, id_spec) named_prod term = match Constr.kind term with
   | App (_, args) -> let mode = List.hd (extr_get_modes env id_spec) in
     let ind_ref = List.assoc id_spec env.extr_henv.ind_refs in
-    let ind = destInd (constr_of_global (global ind_ref)) in
+    let ind = Globnames.destIndRef (global ind_ref) in
     let typs = find_types_of_ind ind in
     let args = filter_mode_skip mode (Array.to_list args) in
     let typs = filter_mode_skip mode typs in
@@ -217,30 +216,30 @@ let build_concl (env, id_spec) named_prod term = match kind_of_term term with
       a::args, env
     ) args typs ([], env) in
     fake_type env (MLTFun (id_spec, args, Some mode)), env
-  | _ -> anomalylabstrm "RelationExtraction"
+  | _ -> CErrors.anomaly ~label:"RelationExtraction"
                         (str "Cannot find a constructor's conclusion")
 
 (* Tests if a constr is \/ *)
 let isOr constr =
   if isInd constr then
-    let ind = destInd constr in
+    let ind, _ = destInd constr in
     let _,oid = Inductive.lookup_mind_specif (Global.env ()) ind in
-    (string_of_id oid.mind_typename = "or")
+    (Id.to_string oid.mind_typename = "or")
   else false
 
 (* Tests if a constr is /\ *)
 let isAnd constr =
   if isInd constr then
-    let ind = destInd constr in
+    let ind, _ = destInd constr in
     let _,oid = Inductive.lookup_mind_specif (Global.env ()) ind in
-    (string_of_id oid.mind_typename = "and")
+    (Id.to_string oid.mind_typename = "and")
   else false
 
 (* Tests if a constr is not *)
 let isNot constr =
   if isConst constr then
-    let c = destConst constr in
-    let str = string_of_con c in
+    let c, _ = destConst constr in
+    let str = Constant.to_string c in
     let str' = try let i = String.rindex str '#' in
       String.sub str (i+1) (String.length str - i - 1)
     with Not_found | Invalid_argument _ -> str in
@@ -252,7 +251,7 @@ let rec build_premisse (env, id_spec) named_prod term =
   let build_predicate ind args = 
     let _, oib = Inductive.lookup_mind_specif (Global.env ()) ind in
     let ind_gref = locate (qualid_of_ident oib.mind_typename) in
-    let id = ident_of_string (string_of_id oib.mind_typename) in
+    let id = ident_of_string (Id.to_string oib.mind_typename) in
     let modes = begin match extr_get_modes env id with
       | [] -> [make_mode ind_gref None]
       | modes -> modes end in
@@ -272,18 +271,18 @@ let rec build_premisse (env, id_spec) named_prod term =
         | [t, ty] -> ty
         | [] ->
           (CTSum [ident_of_string "true";ident_of_string "false"], 
-            Some (constr_of_global 
+            Some (UnivGen.constr_of_global
               (locate (qualid_of_string "Coq.Init.Datatypes.bool"))))
         | _ -> unknown_type env in
       (PMTerm ((prem_term, prem_term_type), Some (fresh_ident "Pm_" ())))::pred_terms, env
     ) modes ([], env) in
     let env = add_indgref_to_env env id ind_gref in
     begin match pred_terms with
-      | [] -> anomalylabstrm "RelationExtraction" (str "Bad premisse form")
+      | [] -> CErrors.anomaly ~label:"RelationExtraction" (str "Bad premisse form")
       | [pred_term] -> pred_term, env
       | _ -> PMChoice (pred_terms, Some (fresh_ident "Pm_" ())), env 
     end in
-  begin match kind_of_term term with
+  begin match Constr.kind term with
     | App (h, [|arg|]) when isNot h ->
       let pm, env = build_premisse (env, id_spec) named_prod arg in
       (PMNot (pm, Some (fresh_ident "Pm_" ())), env)
@@ -298,19 +297,19 @@ let rec build_premisse (env, id_spec) named_prod term =
     | App (h, _) when isConst h -> let t, env = build_term (env, id_spec) 
         named_prod None term in
       PMTerm (t, Some (fresh_ident "Pm_" ())), env
-    | App (h, args) when isInd h -> let ind = destInd h in
+    | App (h, args) when isInd h -> let ind, _ = destInd h in
       build_predicate ind args
     | App (h, args) when isRel h -> let i = destRel h in
       let ind_ref = List.assoc id_spec env.extr_henv.ind_refs in
-      let ind = destInd (constr_of_global (global ind_ref)) in
+      let ind = Globnames.destIndRef (global ind_ref) in
       let mib, oib = Inductive.lookup_mind_specif (Global.env ()) ind in
       let ind_binds = List.rev (Array.to_list mib.mind_packets) in
       let i = i - List.length named_prod - 1 in
       let good_oib = List.nth ind_binds i in
-      let ind_gref = global (Ident (dummy_loc, good_oib.mind_typename)) in
-      let ind = destInd (constr_of_global ind_gref) in
+      let ind_gref = global (qualid_of_ident (good_oib.mind_typename)) in
+      let ind = Globnames.destIndRef ind_gref in
       build_predicate ind args
-    | _ -> anomalylabstrm "RelationExtraction" (str "Bad premisse form")
+    | _ -> CErrors.anomaly ~label:"RelationExtraction" (str "Bad premisse form")
   end
 
 and build_premisse_list (env, id_spec) named_prod terms =
@@ -319,7 +318,7 @@ and build_premisse_list (env, id_spec) named_prod terms =
     p::prems, env
   ) terms ([], env)
 
-let build_prem (env, id_spec) named_prod cstr = match kind_of_term cstr with
+let build_prem (env, id_spec) named_prod cstr = match Constr.kind cstr with
   | App (_, args) ->
     let t, env = build_premisse (env, id_spec) named_prod cstr in
     begin match t with
@@ -334,7 +333,7 @@ let build_prem (env, id_spec) named_prod cstr = match kind_of_term cstr with
 let rec build_prems (env, id_spec) named_prod cstr_list = match cstr_list with
   | [] -> [], env
   | cstr::tail -> if isProd cstr then
-    anomalylabstrm "RelationExtraction" (str "Too many products in a premisse")
+    CErrors.anomaly ~label:"RelationExtraction" (str "Too many products in a premisse")
   else
     let p, env = build_prem (env, id_spec) (List.tl named_prod) cstr in
     let p2, env = build_prems (env, id_spec) (List.tl named_prod) tail in
@@ -349,7 +348,7 @@ let build_prop (env, id_spec) prop_name prop_type =
   let prems = List.map snd named_prems in
   let prems, env = build_prems (env, id_spec) named_prod prems in
   let vars = map_filter (fun (x, _) -> match x with 
-    | Name id -> true, ident_of_string (string_of_id id)
+    | Name id -> true, ident_of_string (Id.to_string id)
     | Anonymous -> false, ident_of_string "") named_prod in
   {
     prop_name = Some prop_name;
@@ -362,10 +361,10 @@ let build_prop (env, id_spec) prop_name prop_type =
 (* Parses one predicate's specification. *)
 let find_one_spec env (id_spec, _) =
   let idr = List.assoc id_spec env.extr_henv.ind_refs in
-  let ind = destInd (constr_of_global (global idr)) in
+  let ind = Globnames.destIndRef (global idr) in
   let _, oib = Inductive.lookup_mind_specif (Global.env ()) ind in
   let props, env = List.fold_right2 (fun prop_name cstr (pl, env) -> 
-      let prop_name = ident_of_string (string_of_id prop_name) in
+      let prop_name = ident_of_string (Id.to_string prop_name) in
       let p, env = build_prop (env, id_spec) prop_name cstr in
       p::pl, env
     )

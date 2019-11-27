@@ -1,5 +1,4 @@
-Add LoadPath "..".
-Declare ML Module "relation_extraction_plugin".
+Require Import RelationExtraction.
 
 Inductive even : nat -> Prop :=
   | even_O : even 0

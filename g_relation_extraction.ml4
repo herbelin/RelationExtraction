@@ -23,9 +23,10 @@
 
 (*i camlp4deps: "parsing/grammar.cma" i*)
 
-open Genarg
-open Pp
 open Relation_extraction
+open Pcoq.Prim
+open Pcoq.Constr
+open Ltac_plugin
 
 VERNAC ARGUMENT EXTEND mode
   | [ "(" global(id) "[" integer_list(mde) "]" "as" string(f) ")" ] -> [ (Some f, id, mde, None) ]
@@ -45,35 +46,33 @@ VERNAC ARGUMENT EXTEND modewithrec
 END
 
 
-VERNAC COMMAND EXTEND ExtractionRelation
+VERNAC COMMAND EXTEND ExtractionRelation CLASSIFIED AS SIDEFF
 | [ "Extraction" "Relation" mode_list(modes) ] ->
   [ relation_extraction modes ]
 END
 
-VERNAC COMMAND EXTEND ExtractionRelationRelaxed
+VERNAC COMMAND EXTEND ExtractionRelationRelaxed CLASSIFIED AS SIDEFF
 | [ "Extraction" "Relation" "Relaxed" mode_list(modes) ] ->
   [ relation_extraction_order modes ]
 END
 
-VERNAC COMMAND EXTEND ExtractionRelationSingle
+VERNAC COMMAND EXTEND ExtractionRelationSingle CLASSIFIED AS SIDEFF
 | [ "Extraction" "Relation" "Single" mode_list(modes) ] ->
   [ relation_extraction_single modes ]
 END
 
-VERNAC COMMAND EXTEND ExtractionRelationSingleRelaxed
+VERNAC COMMAND EXTEND ExtractionRelationSingleRelaxed CLASSIFIED AS SIDEFF
 | [ "Extraction" "Relation" "Single" "Relaxed" mode_list(modes) ] ->
   [ relation_extraction_single_order modes ]
 END
 
 
-VERNAC COMMAND EXTEND ExtractionRelationFixpoint
+VERNAC COMMAND EXTEND ExtractionRelationFixpoint CLASSIFIED AS SIDEFF
 | [ "Extraction" "Relation" "Fixpoint" modewithrec_list(modes) ] ->
   [ relation_extraction_fixpoint modes ]
 END
 
-VERNAC COMMAND EXTEND ExtractionRelationFixpointRelaxed
+VERNAC COMMAND EXTEND ExtractionRelationFixpointRelaxed CLASSIFIED AS SIDEFF
 | [ "Extraction" "Relation" "Fixpoint" "Relaxed" modewithrec_list(modes) ] ->
   [ relation_extraction_fixpoint_order modes ]
 END
-
-
