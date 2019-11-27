@@ -24,31 +24,37 @@ open Pred
 open Coq_stuff
 open Util
 open Pp
-open Miniml
 open Nametab
 open Libnames
 open Names
 open Term
-open Extract_env
-open Table
+open Constr
+open Extraction_plugin.Miniml
+open Extraction_plugin.Extract_env
 
 (* Gets an inductive global reference from the extract env. *)
 let get_indgref env id =
   try List.assoc id env.extr_henv.ind_grefs with _ -> failwith "get_indgref"
 
+let generic_eq_bool () =
+  Coqlib.find_reference "RelationExtraction" ["RelationExtraction";"RelationExtraction"] "generic_eq_bool"
+
 (* Makes a dummy Coq global_reference. *)
-let mk_dummy_glb (env, id_spec) id =
+let mk_dummy_cst (env, id_spec) id =
   let pred_glb = get_indgref env id_spec in
-  let mod_path = modpath_of_r pred_glb in
-  let dir_path = empty_dirpath in
-  let lbl = mk_label (string_of_ident id) in
-  ConstRef (make_con mod_path dir_path lbl)
+  let mod_path = Extraction_plugin.Table.modpath_of_r pred_glb in
+  let dir_path = DirPath.empty in
+  let lbl = Obj.magic (string_of_ident id) in
+  (* Dummy universes... *)
+  Constr.mkConst (Constant.make3 mod_path dir_path lbl)
+
+let mk_dummy_glb (env, id_spec) id =
+  Globnames.global_of_constr (mk_dummy_cst (env, id_spec) id)
 
 (* Gets a constr from the extract env. *)
 let get_cstr (env, id_spec) id =
   try List.assoc id env.extr_henv.cstrs with _ -> 
-  let fake_gref = mk_dummy_glb (env, id_spec) id in
-  constr_of_global fake_gref
+  mk_dummy_cst (env, id_spec) id
 
 
 (* References on Coq types. *)
@@ -64,7 +70,7 @@ let get_ptrue () =
   Pcons (locate (qualid_of_string "Coq.Init.Datatypes.true"), [])
 
 (* Gets an MiniML id from a ident. *)
-let ml_id_of_ident id = Id (id_of_string (string_of_ident id))
+let ml_id_of_ident id = Id (Id.of_string (string_of_ident id))
 
 (* Finds the rel of an id in a list of binders, if it exists. *)
 let find_rel bind id = 
@@ -76,7 +82,7 @@ let find_rel bind id =
 
 (* Finds the rel of an id in a list of binders, or fails. *)
 let get_rel id bind = match find_rel bind id with
-  | None -> anomalylabstrm "RelationExtraction" (str "Cannot find rel")
+  | None -> CErrors.anomaly ~label:"RelationExtraction" (str "Cannot find rel")
   | Some i -> i
 
 (* Make a new rel for an id. *)
@@ -91,7 +97,7 @@ let rec gen_pat (env, id_spec) bind nbind (p,_) = match p with
       ([], nbind) pl in
       ((Ptuple pats), nbind)
   | MLPConstr (id, pl) -> 
-      let glb = global_of_constr (get_cstr (env, id_spec) id) in
+      let glb = Globnames.global_of_constr (get_cstr (env, id_spec) id) in
       let pats, nbind = List.fold_left 
       (fun (pats, nbind) p -> 
         let (pat, nbind) = gen_pat (env, id_spec) bind nbind p in
@@ -99,14 +105,14 @@ let rec gen_pat (env, id_spec) bind nbind (p,_) = match p with
       ([], nbind) pl in
       ((Pcons (glb, pats)), nbind)
   | MLPConst id -> (* we have to linearise *)
-      (*let glb = global_of_constr (get_cstr (env, id_spec) id) in*)
-      errorlabstrm "RelationExtraction" (str "TODO - constants in patterns")
+      (*let glb = UnivGen.global_of_constr (get_cstr (env, id_spec) id) in*)
+      CErrors.user_err ~hdr:"RelationExtraction" (str "TODO - constants in patterns")
   | MLPVar id -> let rel, nbind = rel_from_id id bind nbind in
       (Prel rel, nbind)
   | MLPWild -> (Pwild, nbind)
   | MLPATrue -> (get_ptrue (), nbind)
   | MLPAFalse -> (get_pfalse (), nbind)
-  | _ -> anomalylabstrm "RelationExtraction" (str "Unknown pattern in MiniML")
+  | _ -> CErrors.anomaly ~label:"RelationExtraction" (str "Unknown pattern in MiniML")
 
 (* Generates a term. *)
 and gen_term (env, id_spec) default bind (t,_) = match t with
@@ -114,7 +120,7 @@ and gen_term (env, id_spec) default bind (t,_) = match t with
   | MLTTuple tl -> MLtuple (List.map (gen_term (env, id_spec) default bind) tl)
   | MLTConstr (id, tl) -> 
     let cstr = get_cstr (env, id_spec) id in
-    let ref = global_of_constr cstr in
+    let ref = Globnames.global_of_constr cstr in
     MLcons (Tglob (ref, []), ref,
       List.map (gen_term (env, id_spec) default bind) tl)
   | MLTConst id -> let s = string_of_ident id in
@@ -123,16 +129,15 @@ and gen_term (env, id_spec) default bind (t,_) = match t with
         mk_dummy_glb (env, id_spec) (ident_of_string n_name)
       with Not_found | Invalid_argument _ ->
         let cstr = get_cstr (env, id_spec) id in
-        global_of_constr cstr 
+        Globnames.global_of_constr cstr
     in 
     MLglob ref
   | MLTFun (i, tl, _) | MLTFunNot (i, tl, _) -> (* TODO: the *not* case *)
     let glb = 
       if string_of_ident i = "eq_full" then
-        mk_dummy_glb (env, id_spec) (ident_of_string "(=)")
+        generic_eq_bool ()
       else
-        try global_of_constr (get_cstr (env, id_spec) i) 
-        with Not_found -> mk_dummy_glb (env, id_spec) i in
+        Globnames.global_of_constr (get_cstr (env, id_spec) i) in
     MLapp (MLglob glb, List.map (gen_term (env, id_spec) default bind) tl)
   | MLTATrue -> get_true ()
   | MLTAFalse -> get_false ()
@@ -148,22 +153,22 @@ and gen_term (env, id_spec) default bind (t,_) = match t with
       | _ -> assert false
     ) cl in
     let cl' = List.map (fun (c1, c2) -> 
-      MLapp (MLglob (mk_dummy_glb (env, id_spec) (ident_of_string "(=)")),
+      MLapp (MLglob (generic_eq_bool ()),
         [MLrel (get_rel c1 bind); MLrel (get_rel c2 bind)])) cli in
     List.fold_left
       (fun t c -> MLapp (MLglob (mk_dummy_glb (env, id_spec) 
         (ident_of_string "(&&)")), [t; c]))
       (List.hd cl') (List.tl cl')
-  | MLTADefault _ -> default
-  | _ -> anomalylabstrm "RelationExtraction" (str "Unknown term in MiniML")
+  | MLTADefault -> default
+  | _ -> CErrors.anomaly ~label:"RelationExtraction" (str "Unknown term in MiniML")
 
 
 (* Gets the type of a constr. *)
 let rec type_of_constr c =
-  match kind_of_term c with
-  | Const _ | Ind _ | Construct _ | Var _ -> Tglob (global_of_constr c, [])
+  match Constr.kind c with
+  | Const _ | Ind _ | Construct _ | Var _ -> Tglob (Globnames.global_of_constr c, [])
   | App (h, a) ->
-    Tglob (global_of_constr h, List.map type_of_constr (Array.to_list a))
+    Tglob (Globnames.global_of_constr h, List.map type_of_constr (Array.to_list a))
   | Rel i -> Tvar i
   | _ -> assert false
 
@@ -195,9 +200,8 @@ let miniml_init =
         (Util.dummy_loc, qualid_of_string "Coq.Init.Datatypes.bool")) in*)
 (*      let _ = Printf.printf "(* Required by relation extraction. *)\n%s\n\n"
         "let ocaml_beq = fun x y -> if x = y then True else False" in*)
-      let bool_ref = Libnames.Qualid 
-        ((dummy_loc, qualid_of_string "Coq.Init.Datatypes.bool")) in
-      let _ = Table.extract_inductive bool_ref "bool" ["true"; "false"] None in
+      let bool_ref = qualid_of_string "Coq.Init.Datatypes.bool" in
+      let _ = Extraction_plugin.Table.extract_inductive bool_ref "bool" ["true"; "false"] None in
       init_done := true;
       ()
     else ()
@@ -208,7 +212,7 @@ let is_full_extraction mode = List.for_all ((<>) MOutput) mode
 let gen_miniml_func env (id, f) =
   let mode = List.hd (extr_get_modes env id) in
   let glb = get_indgref env id in
-  let typ = Global.type_of_global glb in
+  let typ,_ = UnivGen.type_of_global glb in
   let (prod, _) = decompose_prod typ in
   let nprod = List.rev prod in
   let concl = type_of_concl mode nprod in 
@@ -226,7 +230,7 @@ let gen_miniml_func env (id, f) =
      to declare new ones (verify there existence in the extract env before
      generating references with mk_dummy_glb ?). *)
   let glb = (*mk_dummy_glb (env, id) f.mlfun_name in*)
-            global_of_constr (get_cstr (env, id) f.mlfun_name) in
+            Globnames.global_of_constr (get_cstr (env, id) f.mlfun_name) in
   (glb, mla, mlt)
 
 let rec list_split3 l = match l with
@@ -240,8 +244,8 @@ let add_cstr_to_env env id cstr =
   {env with extr_henv = {env.extr_henv with cstrs = cstrs'}}
 
 let add_fake_cstr_to_env (env, id_spec) id =
-  let fake_gref = mk_dummy_glb (env, id_spec) id in
-  add_cstr_to_env env id (constr_of_global fake_gref)
+  let fake_gref = mk_dummy_cst (env, id_spec) id in
+  add_cstr_to_env env id fake_gref
 
 
 (* MiniML code generation. *)
@@ -257,7 +261,7 @@ let gen_miniml env =
   let fn = string_of_ident (fst (List.hd funs)) in
   let id = fst (List.hd funs) in
   let glb = get_indgref env id in
-  let lbl = mk_label fn in
-  let mpt = modpath_of_r glb in
+  let lbl = Label.make fn in
+  let mpt = Extraction_plugin.Table.modpath_of_r glb in
   let mls = [mpt, [lbl, SEdecl mld]] in 
-  print_one_decl mls mpt mld
+  Feedback.msg_info (print_one_decl mls mpt mld)

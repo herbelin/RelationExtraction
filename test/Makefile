@@ -1,6 +1,7 @@
 # Configuration
 OCAMLC=ocamlc
 COQC=$(COQBIN)coqc
+INCLUDE=-I .. -R .. RelationExtraction
 
 ##############################################################################
 # usage:
@@ -16,8 +17,8 @@ ML_TESTS_OBJ=$(subst .v,.cmo,$(TESTS))
 
 all: $(ML_TESTS) test coq_test
 
-%.ml: %.v $(COQC)
-	$(COQC) $< >$@
+%.ml: %.v
+	$(COQC) $(INCLUDE) $< >$@
 
 %.cmo: %.ml
 	$(OCAMLC) -c $<
@@ -34,8 +35,9 @@ test: tester
 	./tester
 
 coq_test:
-	python test_coq_files.py $(COQC) $(COQ_TESTS)
+	python test_coq_files.py "$(COQC)" $(COQ_TESTS)
 
 clean:
 	rm -f $(ML_TESTS) *.cmo *.cmi *.vo *.glob tester
 
+install:

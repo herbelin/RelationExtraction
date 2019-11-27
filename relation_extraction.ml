@@ -22,23 +22,13 @@
 
 open Util
 open Pp
-open Printer
 open Declarations
 open Names
-open Term
-open Pattern
-open Libnames
 open Nametab
-open Univ
-open Miniml
-open Common
-open Extract_env
-open Table
 open Pred
 open Coq_stuff
 open Fixpred
 open Fixpointgen
-open Proof_scheme
 
 
 (************************)
@@ -62,21 +52,21 @@ let rec find_func_name ind_ref modes = match modes with
 let extract_relation_common dep ord ind_ref modes =
   (* Initial henv *)
   let ind_refs, ind_grefs = List.split (List.map ( fun (_, ind_ref, _, _) ->
-    let ind = destInd (constr_of_global (global ind_ref)) in
+    let ind = Globnames.destIndRef (global ind_ref) in
     let _, oib = Inductive.lookup_mind_specif (Global.env ()) ind in
-    let id = ident_of_string (string_of_id oib.mind_typename) in
+    let id = ident_of_string (Id.to_string oib.mind_typename) in
     (id, ind_ref), (id, global ind_ref) ) modes) in
   let henv = { ind_refs = ind_refs; ind_grefs = ind_grefs; cstrs = [] } in
   
   (* Extractions *)
   let ids = List.map (fun ind_ref ->
-    let ind = destInd (constr_of_global (global ind_ref)) in
+    let ind = Globnames.destIndRef (global ind_ref) in
     let _, oib = Inductive.lookup_mind_specif (Global.env ()) ind in
   (*let idrs = List.map (fun oib -> Ident (dummy_loc, oib.mind_typename)) 
              oibs in*)
   (*TODO: add irds to ind_refs if they are not present ? 
           ie no mode given, or fail ? *)
-    ident_of_string (string_of_id oib.mind_typename), ind_ref
+    ident_of_string (Id.to_string oib.mind_typename), ind_ref
   ) ind_ref in
   let extractions = List.map (fun (id, ind_ref) ->
     let (fn, rs) = find_func_name ind_ref modes in
@@ -85,9 +75,9 @@ let extract_relation_common dep ord ind_ref modes =
   (* Modes *)
   let modes = List.map ( fun (_, ind_ref, mode, _) ->
     let ind_glb = global ind_ref in
-    let ind = destInd (constr_of_global ind_glb) in
+    let ind = Globnames.destIndRef ind_glb in
     let _, oib = Inductive.lookup_mind_specif (Global.env ()) ind in
-    let id = ident_of_string (string_of_id oib.mind_typename) in
+    let id = ident_of_string (Id.to_string oib.mind_typename) in
     (id, [make_mode ind_glb (Some (adapt_mode ind_ref mode))]) 
   ) modes in
   let eq_modes = [[MSkip;MInput;MOutput]; [MSkip;MOutput;MInput]; 
@@ -109,9 +99,9 @@ let extract_relation_common dep ord ind_ref modes =
   let env = Host2spec.find_specifications empty_env in
   (*Printf.eprintf "%s\n" (pp_extract_env env);*)
   let env = try Pred.make_trees env with
-    | RelationExtractionProp (Some p_id, s) -> errorlabstrm "RelationExtraction"
+    | RelationExtractionProp (Some p_id, s) -> CErrors.user_err ~hdr:"RelationExtraction"
       (str ("Extraction failed at " ^ string_of_ident p_id ^ ": " ^ s))
-    | RelationExtractionProp (None, s) -> errorlabstrm "RelationExtraction"
+    | RelationExtractionProp (None, s) -> CErrors.user_err ~hdr:"RelationExtraction"
       (str ("Extraction failed: " ^ s))
   in
  (*Printf.eprintf "%s\n" (pp_extract_env env); *)

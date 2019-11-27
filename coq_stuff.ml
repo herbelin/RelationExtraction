@@ -24,22 +24,22 @@ open Host_stuff
 open Pred
 open Libnames
 open Nametab
-open Term
 open Util
 open Pp
+open Context.Rel.Declaration
 
-type htyp = Term.types option
+type htyp = Constr.types option
 
 type henv = {
-  ind_refs : (ident * Libnames.reference) list;
-  ind_grefs : (ident * Libnames.global_reference) list;
-  cstrs : (ident * Term.constr) list;
+  ind_refs : (ident * Libnames.qualid) list;
+  ind_grefs : (ident * Names.GlobRef.t) list;
+  cstrs : (ident * Constr.constr) list;
 }
 
 let coq_get_fake_type () = None
 
 let coq_get_bool_type () = (["true"; "false"], 
-  Some (constr_of_global (locate (qualid_of_string "Coq.Init.Datatypes.bool"))))
+  Some (UnivGen.constr_of_global (locate (qualid_of_string "Coq.Init.Datatypes.bool"))))
 
 let coq_functions = {
   h_get_fake_type = coq_get_fake_type;
@@ -49,31 +49,18 @@ let coq_functions = {
 
 (* Extraction of dependencies *)
 let extract_dependencies henv =
-  (* We need a list of references *)
+  (* We need a list of references; Extraction missing an entry point with GlobRef.t ?? *)
   let refl = List.map (fun (_, c) -> 
-    let i = begin match Term.kind_of_term c with
-      | Term.Construct _ -> let ind, _ = Term.destConstruct c in
-        let _, oib = Inductive.lookup_mind_specif (Global.env ()) ind in
-        oib.Declarations.mind_typename
-      | Term.Const c -> Names.id_of_string (Names.string_of_con c)
+    match Constr.kind c with
+      | Constr.Construct _ | Constr.Const _ ->
+         Constrextern.extern_reference Names.Id.Set.empty (Globnames.global_of_constr c)
       | _ -> assert false
-    end in
-    
-    (* Hack to remove the [module.]name which is not handle by the extraction 
-       plugin *)
-    let i = try
-      let i = Names.string_of_id i in
-      let pos = String.rindex i '.' + 1 in
-      Names.id_of_string (String.sub i pos (String.length i - pos))
-    with Not_found -> i in
-
-    Libnames.Ident (Util.dummy_loc, i)
   ) henv.cstrs in
   (* Not required anymore (Coq bool is mapped to OCaml bool) *)
   (*let refl = (Libnames.Qualid 
     (Util.dummy_loc, Libnames.qualid_of_string "Coq.Init.Datatypes.bool"))::
     refl in *)
-  Extract_env.full_extraction None refl
+  Extraction_plugin.Extract_env.full_extraction None refl
 
 
 (* Generates mode arguments for nb parameters. *)
@@ -82,12 +69,10 @@ let rec gen_param_args nb =
   else (gen_param_args (nb-1))@[nb]
 
 let adapt_mode ind_ref mode = 
-  let ind = Term.destInd (Libnames.constr_of_global (Nametab.global ind_ref)) in
+  let ind,_ = Constr.destInd (UnivGen.constr_of_global (Nametab.global ind_ref)) in
   let _, oib = Inductive.lookup_mind_specif (Global.env ()) ind in
   let parameters = oib.Declarations.mind_arity_ctxt in
-  let fil = List.filter ( fun (n, _, _) -> match n with
-    | Names.Anonymous -> false
-    | _ -> true ) parameters in
+  let fil = List.filter (get_name %> Names.Name.is_name) parameters in
   let param_nb = List.length fil in
   let mode = List.map (fun i -> i + param_nb) mode in
   (gen_param_args param_nb) @ mode
@@ -101,12 +86,11 @@ let rec list_mem_option x l = match l with
 
 (* Gets the type of one inductive body *)
 let get_user_arity = function
-  | Declarations.Monomorphic m -> m.Declarations.mind_user_arity
-  | _ -> Util.errorlabstrm "RelationExtraction"
-                      (Pp.str "Cannot deal with polymorphic inductive arity")
+  | Declarations.RegularArity m -> m.Declarations.mind_user_arity
+  | _ -> CErrors.user_err (Pp.str "Cannot deal with polymorphic inductive arity")
 
 let make_mode ind_glb user_mode =
-  let ind = Term.destInd (Libnames.constr_of_global ind_glb) in
+  let ind, _ = Constr.destInd (UnivGen.constr_of_global ind_glb) in
   let _, oib = Inductive.lookup_mind_specif (Global.env ()) ind in
   let typ = get_user_arity oib.Declarations.mind_arity in
   let (args_real, _) = Term.decompose_prod typ in
@@ -137,11 +121,11 @@ let make_mode ind_glb user_mode =
       else MOutput::(rec_mode tl_args (i+1)) in
   rec_mode args 1
 
-let pp_coq_constr c = Pp.string_of_ppcmds (Termops.print_constr c)
+let pp_coq_constr c = Pp.string_of_ppcmds (Printer.pr_econstr_env (Global.env()) (Evd.from_env (Global.env())) c)
 
 let get_coq_type (_,t) = match t with
   | Some ct -> ct
-  | _ -> anomalylabstrm "RelationExtraction" (str "Missing type information")
+  | _ -> CErrors.anomaly ~label:"RelationExtraction" (str "Missing type information")
 
 let get_in_types (env, id) =
   let rec get_in_rec args mode = match (args, mode) with
@@ -155,7 +139,7 @@ let get_in_types (env, id) =
     | FixCount ->
       (* When a function is extracted with a counter, we have to add
          an argument (at first position) of type nat. *)
-      let coq_nat = Some (constr_of_global 
+      let coq_nat = Some (UnivGen.constr_of_global
           (locate (qualid_of_string "Coq.Init.Datatypes.nat"))) in
       let nat_typ = CTSum [ident_of_string "O"; ident_of_string "S"], coq_nat in
       MInput::mode, nat_typ::args_types
@@ -173,17 +157,17 @@ let get_out_type opt (env, id) =
   let mode = List.hd (extr_get_modes env id) in
   let args_types = (extr_get_spec env id).spec_args_types in
   match get_out_rec args_types mode with
-    | [] -> constr_of_global 
+    | [] -> UnivGen.constr_of_global
               (locate (qualid_of_string "Coq.Init.Datatypes.bool"))
     | (_ , Some t)::_ -> if opt && comp then
-      let opt = constr_of_global 
+      let opt = UnivGen.constr_of_global
               (locate (qualid_of_string "Coq.Init.Datatypes.option")) in
-      mkApp (opt, [|t|])
+      Constr.mkApp (opt, [|t|])
       else t
-    | _ -> anomalylabstrm "RelationExtraction" (str "Missing type information")
+    | _ -> CErrors.anomaly ~label:"RelationExtraction" (str "Missing type information")
 
 let find_coq_constr_s s = 
-  constr_of_global (locate (qualid_of_string s))
+  UnivGen.constr_of_global (locate (qualid_of_string s))
 
 let find_coq_constr_i i = 
   find_coq_constr_s (string_of_ident i)

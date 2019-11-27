@@ -1,5 +1,4 @@
-Add LoadPath "..".
-Declare ML Module "relation_extraction_plugin".
+Require Import RelationExtraction.
 
 Inductive fibo : nat -> nat -> Prop :=
 | cgen : forall a n r1 r2, fibo n r1 -> fibo (S n) r2 ->

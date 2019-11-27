@@ -1,5 +1,4 @@
-Add LoadPath "..".
-Declare ML Module "relation_extraction_plugin".
+Require Import RelationExtraction.
 
 Inductive abr : Set := Empty : abr | Node : abr -> nat -> abr -> abr.
 Inductive comp_nat : Set := Inf | Sup | Eq.

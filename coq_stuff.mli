@@ -24,13 +24,13 @@ open Host_stuff
 open Pred
 
 (* Coq types. *)
-type htyp = Term.types option
+type htyp = Constr.types option
 
 (* Coq environment. *)
 type henv = {
-  ind_refs : (ident * Libnames.reference) list;
-  ind_grefs : (ident * Libnames.global_reference) list;
-  cstrs : (ident * Term.constr) list;
+  ind_refs : (ident * Libnames.qualid) list;
+  ind_grefs : (ident * Names.GlobRef.t) list;
+  cstrs : (ident * Constr.constr) list;
 }
 
 (* Functions to manipulate Coq data. *)
@@ -44,28 +44,28 @@ val extract_dependencies : henv -> unit
 (*********)
 
 (* Mode adapter for parameters. Must be used on all modes given by the user. *)
-val adapt_mode : Libnames.reference -> int list -> int list
+val adapt_mode : Libnames.qualid -> int list -> int list
 
 (* Mode conversion, with skipers for implicit arguments. 
    If the mode is not provided, it returns the full mode.
    adapt_mode may be invoked prior to this function. *)
-val make_mode : Libnames.global_reference -> (int list) option -> mode
+val make_mode : Names.GlobRef.t -> (int list) option -> mode
 
 (* Get the type of the arguments of an extracted function. *)
 val get_in_types : (htyp, henv) extract_env * ident -> htyp term_type list
 
 (* Gets the output type of an extracted function,
    ignoring the eventual completion with the type option when opt is false. *)
-val get_out_type : bool -> (htyp, henv) extract_env * ident -> Term.types
+val get_out_type : bool -> (htyp, henv) extract_env * ident -> Constr.types
 
 (* Gets the Coq type from a term_type. *)
-val get_coq_type : htyp term_type -> Term.types
+val get_coq_type : htyp term_type -> Constr.types
 
 (* Find a Coq constr from its name (as an ident or a string) *)
-val find_coq_constr_i : ident -> Term.constr
-val find_coq_constr_s : string -> Term.constr
+val find_coq_constr_i : ident -> Constr.constr
+val find_coq_constr_s : string -> Constr.constr
 
 
 (* Prints a Coq constr. *)
-val pp_coq_constr : Term.constr -> string
+val pp_coq_constr : EConstr.constr -> string
 
