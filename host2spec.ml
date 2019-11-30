@@ -49,8 +49,8 @@ let add_cstr_to_env env id cstr =
   {env with extr_henv = {env.extr_henv with cstrs = cstrs'}}
 
 (* Gets the identifier of a binder *)
-let get_name = function
-  | (Name id, _) -> id
+let get_name (binder,_) = match Context.binder_name binder with
+  | Name id -> id
   | _ -> CErrors.anomaly ~label:"RelationExtraction"
                         (str "Cannot find the name of a binder")
 
@@ -271,7 +271,7 @@ let rec build_premisse (env, id_spec) named_prod term =
         | [t, ty] -> ty
         | [] ->
           (CTSum [ident_of_string "true";ident_of_string "false"], 
-            Some (UnivGen.constr_of_global
+            Some (UnivGen.constr_of_monomorphic_global
               (locate (qualid_of_string "Coq.Init.Datatypes.bool"))))
         | _ -> unknown_type env in
       (PMTerm ((prem_term, prem_term_type), Some (fresh_ident "Pm_" ())))::pred_terms, env
@@ -344,10 +344,10 @@ let rec build_prems (env, id_spec) named_prod cstr_list = match cstr_list with
 let build_prop (env, id_spec) prop_name prop_type =
   let named_prod, concl = decompose_prod prop_type in
   let concl, env = build_concl (env, id_spec) named_prod concl in
-  let named_prems = List.filter (fun (x, _) -> x = Anonymous) named_prod in
+  let named_prems = List.filter (fun (x, _) -> Context.binder_name x = Anonymous) named_prod in
   let prems = List.map snd named_prems in
   let prems, env = build_prems (env, id_spec) named_prod prems in
-  let vars = map_filter (fun (x, _) -> match x with 
+  let vars = map_filter (fun (x, _) -> match Context.binder_name x with 
     | Name id -> true, ident_of_string (Id.to_string id)
     | Anonymous -> false, ident_of_string "") named_prod in
   {

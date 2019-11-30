@@ -20,59 +20,59 @@
 (*                 Pierre-Nicolas Tollitte <tollitte@ensiie.fr>             *)
 (****************************************************************************)
 
-
-(*i camlp4deps: "parsing/grammar.cma" i*)
+{
 
 open Relation_extraction
 open Pcoq.Prim
 open Pcoq.Constr
-open Ltac_plugin
+
+}
 
 VERNAC ARGUMENT EXTEND mode
-  | [ "(" global(id) "[" integer_list(mde) "]" "as" string(f) ")" ] -> [ (Some f, id, mde, None) ]
-  | [ "(" global(id) "[" integer_list(mde) "]" ")" ] -> [ (None, id, mde, None) ]
+  | [ "(" global(id) "[" integer_list(mde) "]" "as" string(f) ")" ] -> { (Some f, id, mde, None) }
+  | [ "(" global(id) "[" integer_list(mde) "]" ")" ] -> { (None, id, mde, None) }
 END
 
 
 VERNAC ARGUMENT EXTEND rec_style
-  | [ "Struct" integer(i) ] -> [ Some (Pred.StructRec i) ]
-  | [ "Counter" ] -> [ Some Pred.FixCount ]
-  | [] -> [ None ]
+  | [ "Struct" integer(i) ] -> { Some (Pred.StructRec i) }
+  | [ "Counter" ] -> { Some Pred.FixCount }
+  | [] -> { None }
 END
 
 VERNAC ARGUMENT EXTEND modewithrec
-  | [ "(" global(id) "[" integer_list(mde) "]" rec_style(r) "as" string(f) ")" ] -> [ (Some f, id, mde, r) ]
-  | [ "(" global(id) "[" integer_list(mde) "]" rec_style(r) ")" ] -> [ (None, id, mde, r) ]
+  | [ "(" global(id) "[" integer_list(mde) "]" rec_style(r) "as" string(f) ")" ] -> { (Some f, id, mde, r) }
+  | [ "(" global(id) "[" integer_list(mde) "]" rec_style(r) ")" ] -> { (None, id, mde, r) }
 END
 
 
 VERNAC COMMAND EXTEND ExtractionRelation CLASSIFIED AS SIDEFF
 | [ "Extraction" "Relation" mode_list(modes) ] ->
-  [ relation_extraction modes ]
+  { relation_extraction modes }
 END
 
 VERNAC COMMAND EXTEND ExtractionRelationRelaxed CLASSIFIED AS SIDEFF
 | [ "Extraction" "Relation" "Relaxed" mode_list(modes) ] ->
-  [ relation_extraction_order modes ]
+  { relation_extraction_order modes }
 END
 
 VERNAC COMMAND EXTEND ExtractionRelationSingle CLASSIFIED AS SIDEFF
 | [ "Extraction" "Relation" "Single" mode_list(modes) ] ->
-  [ relation_extraction_single modes ]
+  { relation_extraction_single modes }
 END
 
 VERNAC COMMAND EXTEND ExtractionRelationSingleRelaxed CLASSIFIED AS SIDEFF
 | [ "Extraction" "Relation" "Single" "Relaxed" mode_list(modes) ] ->
-  [ relation_extraction_single_order modes ]
+  { relation_extraction_single_order modes }
 END
 
 
 VERNAC COMMAND EXTEND ExtractionRelationFixpoint CLASSIFIED AS SIDEFF
-| [ "Extraction" "Relation" "Fixpoint" modewithrec_list(modes) ] ->
-  [ relation_extraction_fixpoint modes ]
+| ![ proof ] [ "Extraction" "Relation" "Fixpoint" modewithrec_list(modes) ] ->
+  { relation_extraction_fixpoint modes }
 END
 
 VERNAC COMMAND EXTEND ExtractionRelationFixpointRelaxed CLASSIFIED AS SIDEFF
-| [ "Extraction" "Relation" "Fixpoint" "Relaxed" modewithrec_list(modes) ] ->
-  [ relation_extraction_fixpoint_order modes ]
+| ![ proof ] [ "Extraction" "Relation" "Fixpoint" "Relaxed" modewithrec_list(modes) ] ->
+  { relation_extraction_fixpoint_order modes }
 END

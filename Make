@@ -1,6 +1,7 @@
 -R . RelationExtraction
 -I .
 
+COQMF_WARN = "-w +a-4-9-27-41-42-44-45-48-50-58-59"
 host_stuff.mli
 proof_scheme.mli
 proof_scheme.ml
@@ -22,7 +23,7 @@ fixpointgen.mli
 fixpointgen.ml
 relation_extraction.mli
 relation_extraction.ml
-g_relation_extraction.ml4
+g_relation_extraction.mlg
 relation_extraction_plugin.mlpack
 RelationExtraction.v
 test

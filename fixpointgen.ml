@@ -75,13 +75,13 @@ let _extract_type_from_option ctyp = match Constr.kind ctyp with
 let rec gen_constr (env, id) fn bind (fterm,_) = match fterm with
   | FixVar i -> mkRel (Minimlgen.get_rel i bind)
   | FixConstr (i, [t,(ty,Some cty)]) when string_of_ident i = "Some" -> 
-    let some = UnivGen.constr_of_global
+    let some = UnivGen.constr_of_monomorphic_global
       (locate (qualid_of_string "Coq.Init.Datatypes.Some")) in
     let args = Array.of_list 
       [cty ; (gen_constr (env, id) fn bind (t,(ty,Some cty)))] in
     mkApp (some, args)
   | FixConstr (i, []) when string_of_ident i = "None" -> 
-    let none = UnivGen.constr_of_global
+    let none = UnivGen.constr_of_monomorphic_global
       (locate (qualid_of_string "Coq.Init.Datatypes.None")) in
     let args = Array.of_list 
       [(* debug TODO: not always out_type ?*) get_out_type false (env, id)] in
@@ -94,8 +94,11 @@ let rec gen_constr (env, id) fn bind (fterm,_) = match fterm with
   | FixFun (i, tl) -> 
     let c = if i = fn then mkRel (List.length bind + 1)
             else try List.assoc i (env.extr_henv.cstrs) with Not_found -> 
-      UnivGen.constr_of_global (Nametab.global
-        (qualid_of_ident (Id.of_string (string_of_ident i)))) in
+      let gr = Nametab.global
+        (qualid_of_ident (Id.of_string (string_of_ident i))) in
+      if Global.is_polymorphic gr then CErrors.user_err (str "Polymorphic references not supported.");
+      (* to support polymorphic constant, one would need to pass an evar_map *)
+      UnivGen.constr_of_monomorphic_global gr in
     let args = Array.of_list (List.map (gen_constr (env,id) fn bind) tl) in
     mkApp (c, args)
   | FixFunNot _ -> 
@@ -111,32 +114,35 @@ let rec gen_constr (env, id) fn bind (fterm,_) = match fterm with
         let _,oib = Inductive.lookup_mind_specif (Global.env ()) ind in
         ind, oib
       | _ -> assert false in
-    let case_inf = Inductiveops.make_case_info (Global.env()) ind MatchStyle in
+    let case_inf = Inductiveops.make_case_info (Global.env()) ind Sorts.Relevant MatchStyle in
     let cstrs_arg_types = find_args_types sty in
-    let ty = mkLambda (Anonymous, sty, (get_out_type true (env,id))) in
+    let ty = mkLambda (Context.anonR, sty, (get_out_type true (env,id))) in
     let ta = Array.of_list (List.map2 (fun (il, t, _) tyl ->
       let nbind = (List.rev il) @ bind in
       List.fold_right2 (fun i ty t -> 
-        mkLambda (Name (Id.of_string (string_of_ident i)), ty, t)
+        mkLambda (Context.nameR (Id.of_string (string_of_ident i)), ty, t)
       ) il tyl (gen_constr (env,id) fn nbind t)  
     ) iltl cstrs_arg_types) in
     mkCase (case_inf, ty, (gen_constr (env,id) fn bind t), ta)
   | FixCase _ -> CErrors.anomaly ~label:"RelationExtraction"
     (str "Missing type information in pattern matching")
-  | FixSome (t,(ty,Some cty)) -> let some = UnivGen.constr_of_global
+  | FixSome (t,(ty,Some cty)) ->
+    (* TODO: "option" may become polymorphic at some time *)
+    let some = UnivGen.constr_of_monomorphic_global
     (locate (qualid_of_string "Coq.Init.Datatypes.Some")) in
     let args = Array.of_list 
                [cty ; (gen_constr (env,id) fn bind (t,(ty,Some cty)))] in
     mkApp (some, args)
-  | FixNone -> let non = UnivGen.constr_of_global
+  | FixNone -> let non = UnivGen.constr_of_monomorphic_global
+    (* TODO: "option" may become polymorphic at some time *)
     (locate (qualid_of_string "Coq.Init.Datatypes.None")) in
     mkApp (non, [|get_out_type false (env,id)|])
-  | FixTrue -> UnivGen.constr_of_global
+  | FixTrue -> UnivGen.constr_of_monomorphic_global
     (locate (qualid_of_string "Coq.Init.Datatypes.true"))
-  | FixFalse -> UnivGen.constr_of_global
+  | FixFalse -> UnivGen.constr_of_monomorphic_global
     (locate (qualid_of_string "Coq.Init.Datatypes.false"))
   | FixLetin (i, (l,(ty, Some sty)), t, _) ->
-    mkLetIn (Name (Id.of_string (string_of_ident i)),
+    mkLetIn (Context.nameR (Id.of_string (string_of_ident i)),
       (gen_constr (env,id) fn bind (l,(ty, Some sty))), sty,
       (gen_constr (env,id) fn (i::bind) t))
   | FixLetin _ -> CErrors.anomaly ~label:"RelationExtraction"
@@ -148,32 +154,33 @@ let gen_fix_type (env,id) args =
   let in_types = get_in_types (env, id) in
   let out_type = get_out_type true (env, id) in
   List.fold_right2 ( fun at an typs -> 
-    mkProd (Name (Id.of_string an), get_coq_type at, typs)
+    mkProd (Context.nameR (Id.of_string an), get_coq_type at, typs)
   ) in_types args out_type
 
 
 (* Generates and registers Coq Fixpoints. *)
-let gen_fixpoint_bis env =
+let gen_fixpoint pstate env =
   let glbs = List.map (fun (i, (f, _)) ->
     let (fn, args, t) = f.fixfun_name, f.fixfun_args, f.fixfun_body in
     let c = gen_constr (env,i) fn (List.rev args) t in
     let typs = get_in_types (env, i) in
     let c = List.fold_right2 ( fun a t c -> 
-      mkLambda (Name (Id.of_string a), get_coq_type t, c) )
+      mkLambda (Context.nameR (Id.of_string a), get_coq_type t, c) )
       (List.map string_of_ident args) typs c in
     let ty = gen_fix_type (env,i) (List.map string_of_ident args) in
     let recdec = 
-      ([|(Name (Id.of_string (string_of_ident fn)))|], [|ty|], [|c|]) in
+      ([|(Context.nameR (Id.of_string (string_of_ident fn)))|], [|ty|], [|c|]) in
     let fi = match fix_get_recursion_style env i with
       | StructRec i -> ([|i-1|], 0), recdec 
       | _ -> ([|0|], 0), recdec in
     let f = mkFix fi in
-    let univs = Entries.Monomorphic_const_entry (Univ.ContextSet.empty) in (* ?? *)
+    let univs = Entries.Monomorphic_entry (Univ.ContextSet.empty) in (* ?? *)
     let f = Safe_typing.mk_pure_proof f in
-    DeclareDef.declare_fix (Global,false,Fixpoint) UnivNames.empty_binders univs (Id.of_string (string_of_ident fn)) f ty []
+    DeclareDef.declare_fix ~ontop:None (Global,false,Fixpoint) UnivNames.empty_binders univs (Id.of_string (string_of_ident fn)) f ty []
   ) env.extr_fixfuns in 
   let glb = List.hd glbs in
-  let cstr = UnivGen.constr_of_global glb in
+  if Global.is_polymorphic glb then CErrors.user_err (str "Polymorphic references not supported.");
+  let cstr = UnivGen.constr_of_monomorphic_global glb in
   let cst,_ = destConst cstr in
   let cst_body = Global.lookup_constant cst in
   let _ = match cst_body.Declarations.const_body with
@@ -181,12 +188,7 @@ let gen_fixpoint_bis env =
   | _ -> () (* ?? *) in
 
   (* Proofs generation *)
-  let _ = List.iter (fun (id, _) -> gen_correction_proof env id) 
-    env.extr_fixfuns in
-  ()
-
-(* Generates and registers Coq Fixpoints. *)
-let gen_fixpoint env = 
-  let _ = gen_fixpoint_bis env in ()
+  List.fold_left (fun pstate (id, _) -> gen_correction_proof pstate env id) 
+    pstate env.extr_fixfuns
 
 

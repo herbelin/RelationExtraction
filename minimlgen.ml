@@ -37,16 +37,15 @@ let get_indgref env id =
   try List.assoc id env.extr_henv.ind_grefs with _ -> failwith "get_indgref"
 
 let generic_eq_bool () =
-  Coqlib.find_reference "RelationExtraction" ["RelationExtraction";"RelationExtraction"] "generic_eq_bool"
+  Coqlib.lib_ref "plugins.relation_extraction.generic_eq_bool"
 
 (* Makes a dummy Coq global_reference. *)
 let mk_dummy_cst (env, id_spec) id =
   let pred_glb = get_indgref env id_spec in
   let mod_path = Extraction_plugin.Table.modpath_of_r pred_glb in
-  let dir_path = DirPath.empty in
   let lbl = Obj.magic (string_of_ident id) in
   (* Dummy universes... *)
-  Constr.mkConst (Constant.make3 mod_path dir_path lbl)
+  Constr.mkConst (Constant.make2 mod_path lbl)
 
 let mk_dummy_glb (env, id_spec) id =
   Globnames.global_of_constr (mk_dummy_cst (env, id_spec) id)
