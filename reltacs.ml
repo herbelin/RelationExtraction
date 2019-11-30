@@ -52,17 +52,17 @@ type 'a goal_finder = Id.t option -> EConstr.constr -> 'a option
 (* TODO: check that forall term = type ? *)
 let goal_iterator fa li pr f sigma goal start =
   let rec rec_it i term = match EConstr.kind sigma term with
-    | Prod (Name n, c, c_next) when (fa || pr) && i >= start && 
+    | Prod ({Context.binder_name = Name n}, c, c_next) when (fa || pr) && i >= start && 
         Id.to_string n <> "H" (* H is rec hyp name *) ->
       begin match f (Some n) sigma c with
       | Some res -> i, res
       | None -> rec_it (i+1) c_next end
-    | Prod (Anonymous, c, c_next) when pr && i >= start -> 
+    | Prod ({Context.binder_name = Anonymous}, c, c_next) when pr && i >= start -> 
       begin match f None sigma c with
       | Some res -> i, res
       | None -> rec_it (i+1) c_next end
     | Prod (_, _, c_next) -> rec_it (i+1) c_next
-    | LetIn (Name n, c, _, c_next) when li && i >= start -> 
+    | LetIn ({Context.binder_name = Name n}, c, _, c_next) when li && i >= start -> 
       begin match f (Some n) sigma c with
       | Some res -> i, res
       | None -> rec_it (i+1) c_next end
@@ -192,49 +192,59 @@ let get_goal =
   let goal = ref (EConstr.mkRel 1) in
   let tac = Proofview.Goal.enter ( fun goal_s ->
     goal := Proofview.Goal.concl goal_s; Tacticals.New.tclIDTAC) in
-  fun () -> (ignore (Pfedit.by tac); !goal)
+  fun pstate -> (ignore (Pfedit.by tac pstate); !goal)
 
 (* return type : named_declaration list = 
                    (identifier * constr option * types) list *)
+let get_hyps_in f =
+  Proofview.Goal.enter (fun goal_s -> f (EConstr.named_context (Proofview.Goal.env goal_s)))
+
 let get_hyps =
   let hyps = ref ([]) in
-  let tac = Proofview.Goal.enter ( fun goal_s ->
-    hyps := EConstr.named_context (Proofview.Goal.env goal_s);
-    Tacticals.New.tclIDTAC ) in
-  fun () -> (ignore (Pfedit.by tac); !hyps)
+  let tac = get_hyps_in (fun thehyps -> hyps := thehyps; Tacticals.New.tclIDTAC) in
+  fun pstate -> (ignore (Pfedit.by tac pstate); !hyps)
+
+let get_evarmap_in f =
+  Proofview.Goal.enter (fun goal_s -> f (Proofview.Goal.sigma goal_s))
 
 let get_evarmap =
   let evm = ref (Evd.empty) in
-  let tac = Proofview.Goal.enter ( fun goal_s ->
-    evm := Proofview.Goal.sigma goal_s;
-    Tacticals.New.tclIDTAC ) in
-  fun () -> (ignore (Pfedit.by tac); !evm)
+  let tac = get_evarmap_in (fun sigma -> evm := sigma; Tacticals.New.tclIDTAC ) in
+  fun pstate -> (ignore (Pfedit.by tac pstate); !evm)
 
-let pat_from_constr constr =
-  let evm = get_evarmap () in
+let pat_from_constr pstate constr =
+  let evm = get_evarmap pstate in
   Patternops.pattern_of_constr (Global.env()) evm constr
 
-let get_proof_from_tac (env, id) prover branch =
-  let term = get_goal () in
-  let sigma = get_evarmap () in
+let get_proof_from_tac (env, id) pstate prover branch =
+  let term = get_goal pstate in
+  let sigma = get_evarmap pstate in
   prover (env, id) branch sigma term
 
 let rec get_hyp_by_name hn hyps = match hyps with
   | [] -> raise Not_found
-  | decl::hyps_tl -> let (id, topt, t) = Context.Named.Declaration.to_tuple decl in if Id.to_string id = hn then topt, t else
+  | decl::hyps_tl -> let (id, topt, t) = Context.Named.Declaration.to_tuple decl in
+    if Id.to_string (Context.binder_name id) = hn then topt, t else
     get_hyp_by_name hn hyps_tl
 
-let constr_of_constr_loc cstr_loc = match cstr_loc with
+let constr_of_constr_loc_in cstr_loc f =
+  match cstr_loc with
+  | CoqConstr cstr -> f cstr
+  | LocInHyp (hn, hyp_finder) ->
+    get_hyps_in (fun hyps -> let h_cstr_opt, h_cstr = get_hyp_by_name hn hyps in
+    get_evarmap_in (fun sigma -> f (hyp_finder h_cstr_opt sigma h_cstr)))
+
+let constr_of_constr_loc pstate cstr_loc = match cstr_loc with
   | CoqConstr cstr -> cstr
   | LocInHyp (hn, hyp_finder) -> let h_cstr_opt, h_cstr = 
-      get_hyp_by_name hn (get_hyps ()) in
-    hyp_finder h_cstr_opt (get_evarmap ()) h_cstr
+    get_hyp_by_name hn (get_hyps pstate) in
+    hyp_finder h_cstr_opt (get_evarmap pstate) h_cstr
 
 let intros_until_n_wored i = Tactics.intros_until (Tactypes.AnonHyp i) (* TODO: is with red ok *)
 let symmetry_in id = Tactics.intros_symmetry (Locusops.onHyp id)
 let replace_in hid cstr_pat cstr = Equality.replace_in_clause_maybe_by cstr_pat cstr (Locusops.onHyp hid) None
 
-let print_subgoals () = Feedback.msg_notice (Printer.pr_open_subgoals ~proof:(Proof_global.give_me_the_proof ()))
+let print_subgoals pstate = Feedback.msg_notice (Printer.pr_open_subgoals ~proof:(Proof_global.give_me_the_proof pstate))
 
 (* Makes real Coq tactics and applies them. *)
 let rec build_tac_atom ta = match ta with
@@ -292,9 +302,10 @@ let rec build_tac_atom ta = match ta with
   | APPLYIND str -> let ind_scheme = str ^ "_ind" in
     build_tac_atom (APPLY ind_scheme)
   | CHANGEC (h, cstr_pat, cloc) ->
-    let cstr_pat = constr_of_constr_loc cstr_pat in
-    let cstr = constr_of_constr_loc cloc in
-    let hyps_ids = List.map Context.Named.Declaration.get_id (get_hyps ()) in
+    constr_of_constr_loc_in cstr_pat (fun cstr_pat ->
+    constr_of_constr_loc_in cloc (fun cstr ->
+    get_hyps_in (fun hyps ->
+    let hyps_ids = List.map Context.Named.Declaration.get_id hyps in
     let orig_hyp_id = Id.of_string h in
     let tac = Equality.replace cstr_pat cstr in
     let t = List.fold_right (fun hid tac -> 
@@ -305,26 +316,26 @@ let rec build_tac_atom ta = match ta with
           (pp_coq_constr cstr) ^ ") in *" in
     if debug_print_tacs then Printf.eprintf "%s.\n" s
     else ();
-    t
+    t)))
   | CHANGEV (h, v, cloc) -> 
     let cstr_pat = mkVar (Id.of_string v) in
     build_tac_atom (CHANGEC (h, CoqConstr cstr_pat, cloc))
   | ASSERTEQUAL (h, v, cloc, t) -> 
-    let cstr = constr_of_constr_loc cloc in
+    constr_of_constr_loc_in cloc (fun cstr ->
     let eq = find_coq_constr_s "eq" in
     let var = mkVar (Id.of_string v) in
     let assert_cstr = mkApp (EConstr.of_constr eq, [|t; var; cstr|]) in
     if debug_print_tacs then 
       Printf.eprintf "assert (%s : %s).\n" h (pp_coq_constr assert_cstr)
     else ();
-    Tactics.assert_before (Name (Id.of_string h)) assert_cstr
+    Tactics.assert_before (Name (Id.of_string h)) assert_cstr)
   | AUTO -> 
     if debug_print_tacs then Printf.eprintf "auto.\n"
     else ();
     Auto.default_auto
 
 (* Proves a goal, with a given prover. *)
-let make_proof (env, id) prover ps =
+let make_proof (env, id) pstate prover ps =
   if debug_print_tacs then
     let (fixfun, _) = extr_get_fixfun env id in
     let fn = string_of_ident fixfun.fixfun_name in
@@ -337,24 +348,24 @@ let make_proof (env, id) prover ps =
   let intro = prover.prov_intro (env, id) ps in
   let concl = prover.prov_concl (env, id) ps in
   let prover = prover.prov_branch in
-  let rec apply_tacs tacs = match tacs with
+  let rec apply_tacs pstate tacs = match tacs with
     | Prop_tacs _ -> assert false
     | Tac_list (t::tl) -> 
       begin if debug_print_goals then 
         begin Printf.printf "\n\n%s\n\n" (pp_tac_atom t); 
-        print_subgoals () end
+        print_subgoals pstate end
       else () end;
-      ignore (Pfedit.by (build_tac_atom t)); apply_tacs (Tac_list tl)
-    | Tac_list [] -> () in
-  apply_tacs intro;
-  List.iter (fun branch ->
-    if debug_print_goals then print_subgoals ()
+      let (pstate,_) = Pfedit.by (build_tac_atom t) pstate in apply_tacs pstate (Tac_list tl)
+    | Tac_list [] -> pstate in
+  let pstate = apply_tacs pstate intro in
+  let pstate = List.fold_left (fun pstate branch ->
+    if debug_print_goals then print_subgoals pstate
     else ();
-    let proof = get_proof_from_tac (env, id) prover branch in
+    let proof = get_proof_from_tac (env, id) pstate prover branch in
     let intros_tac = Tac_list [INTROS proof.pres_intros] in
     match proof.pres_tacts with
-      | Tac_list _ -> apply_tacs intros_tac; 
-        apply_tacs proof.pres_tacts
+      | Tac_list _ -> let pstate = apply_tacs pstate intros_tac in
+        apply_tacs pstate proof.pres_tacts
       | Prop_tacs (til, prop) -> let bint, aint, norm, apro = 
           List.fold_right (fun ti (bi, ai, n, ap) -> 
             ti.ti_before_intros::bi, ti.ti_after_intros::ai, 
@@ -364,19 +375,19 @@ let make_proof (env, id) prover ps =
         let n_tac = Tac_list (List.flatten norm) in
         let ap_tac = Tac_list (List.flatten apro) in
         let prop_tac = Tac_list [APPLYPROP prop] in
-        apply_tacs bi_tac;
-        apply_tacs intros_tac;
-        apply_tacs ai_tac;
-        apply_tacs n_tac;
-        apply_tacs prop_tac;
-        apply_tacs ap_tac
-  ) ps.scheme_branches;
-  apply_tacs concl;
+        let pstate = apply_tacs pstate bi_tac in
+        let pstate = apply_tacs pstate intros_tac in
+        let pstate = apply_tacs pstate ai_tac in
+        let pstate = apply_tacs pstate n_tac in
+        let pstate = apply_tacs pstate prop_tac in
+        apply_tacs pstate ap_tac
+  ) pstate ps.scheme_branches in
+  let pstate = apply_tacs pstate concl in
   if debug_print_tacs then
     Printf.eprintf "Qed.\n"
-  else ()
-  
-  
+  else ();
+  pstate
+
 
 (****************)
 (* Goal finders *)
