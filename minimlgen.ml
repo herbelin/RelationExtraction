@@ -48,7 +48,7 @@ let mk_dummy_cst (env, id_spec) id =
   Constr.mkConst (Constant.make2 mod_path lbl)
 
 let mk_dummy_glb (env, id_spec) id =
-  Globnames.global_of_constr (mk_dummy_cst (env, id_spec) id)
+  Constr.destRef (mk_dummy_cst (env, id_spec) id)
 
 (* Gets a constr from the extract env. *)
 let get_cstr (env, id_spec) id =
@@ -96,7 +96,7 @@ let rec gen_pat (env, id_spec) bind nbind (p,_) = match p with
       ([], nbind) pl in
       ((Ptuple pats), nbind)
   | MLPConstr (id, pl) -> 
-      let glb = Globnames.global_of_constr (get_cstr (env, id_spec) id) in
+      let glb,_ = Constr.destRef (get_cstr (env, id_spec) id) in
       let pats, nbind = List.fold_left 
       (fun (pats, nbind) p -> 
         let (pat, nbind) = gen_pat (env, id_spec) bind nbind p in
@@ -119,16 +119,16 @@ and gen_term (env, id_spec) default bind (t,_) = match t with
   | MLTTuple tl -> MLtuple (List.map (gen_term (env, id_spec) default bind) tl)
   | MLTConstr (id, tl) -> 
     let cstr = get_cstr (env, id_spec) id in
-    let ref = Globnames.global_of_constr cstr in
+    let ref,_ = Constr.destRef cstr in
     MLcons (Tglob (ref, []), ref,
       List.map (gen_term (env, id_spec) default bind) tl)
   | MLTConst id -> let s = string_of_ident id in
-    let ref = try let i = String.rindex s '#' in
+    let ref,_ = try let i = String.rindex s '#' in
         let n_name = String.sub s (i+1) (String.length s - i - 1) in
         mk_dummy_glb (env, id_spec) (ident_of_string n_name)
       with Not_found | Invalid_argument _ ->
         let cstr = get_cstr (env, id_spec) id in
-        Globnames.global_of_constr cstr
+        Constr.destRef cstr
     in 
     MLglob ref
   | MLTFun (i, tl, _) | MLTFunNot (i, tl, _) -> (* TODO: the *not* case *)
@@ -136,7 +136,7 @@ and gen_term (env, id_spec) default bind (t,_) = match t with
       if string_of_ident i = "eq_full" then
         generic_eq_bool ()
       else
-        Globnames.global_of_constr (get_cstr (env, id_spec) i) in
+        fst (Constr.destRef (get_cstr (env, id_spec) i)) in
     MLapp (MLglob glb, List.map (gen_term (env, id_spec) default bind) tl)
   | MLTATrue -> get_true ()
   | MLTAFalse -> get_false ()
@@ -155,8 +155,8 @@ and gen_term (env, id_spec) default bind (t,_) = match t with
       MLapp (MLglob (generic_eq_bool ()),
         [MLrel (get_rel c1 bind); MLrel (get_rel c2 bind)])) cli in
     List.fold_left
-      (fun t c -> MLapp (MLglob (mk_dummy_glb (env, id_spec) 
-        (ident_of_string "(&&)")), [t; c]))
+      (fun t c -> MLapp (MLglob (fst (mk_dummy_glb (env, id_spec)
+        (ident_of_string "(&&)"))), [t; c]))
       (List.hd cl') (List.tl cl')
   | MLTADefault -> default
   | _ -> CErrors.anomaly ~label:"RelationExtraction" (str "Unknown term in MiniML")
@@ -165,9 +165,9 @@ and gen_term (env, id_spec) default bind (t,_) = match t with
 (* Gets the type of a constr. *)
 let rec type_of_constr c =
   match Constr.kind c with
-  | Const _ | Ind _ | Construct _ | Var _ -> Tglob (Globnames.global_of_constr c, [])
+  | Const _ | Ind _ | Construct _ | Var _ -> Tglob (fst (Constr.destRef c), [])
   | App (h, a) ->
-    Tglob (Globnames.global_of_constr h, List.map type_of_constr (Array.to_list a))
+    Tglob (fst (Constr.destRef h), List.map type_of_constr (Array.to_list a))
   | Rel i -> Tvar i
   | _ -> assert false
 
@@ -211,7 +211,7 @@ let is_full_extraction mode = List.for_all ((<>) MOutput) mode
 let gen_miniml_func env (id, f) =
   let mode = List.hd (extr_get_modes env id) in
   let glb = get_indgref env id in
-  let typ,_ = UnivGen.type_of_global glb in
+  let typ,_ = Typeops.type_of_global_in_context (Global.env()) glb in
   let (prod, _) = decompose_prod typ in
   let nprod = List.rev prod in
   let concl = type_of_concl mode nprod in 
@@ -228,8 +228,8 @@ let gen_miniml_func env (id, f) =
      TODO: verfiy that we really have one ref by id and find a good way
      to declare new ones (verify there existence in the extract env before
      generating references with mk_dummy_glb ?). *)
-  let glb = (*mk_dummy_glb (env, id) f.mlfun_name in*)
-            Globnames.global_of_constr (get_cstr (env, id) f.mlfun_name) in
+  let glb,_ = (*mk_dummy_glb (env, id) f.mlfun_name in*)
+            Constr.destRef (get_cstr (env, id) f.mlfun_name) in
   (glb, mla, mlt)
 
 let rec list_split3 l = match l with

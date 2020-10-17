@@ -28,8 +28,8 @@ open Pred
 type scheme_prover
 
 (* Proves a lemma with a given scheme prover. *)
-val make_proof : ((htyp, henv) extract_env * ident) -> Proof_global.t -> scheme_prover -> 
-                 (htyp fix_term) proof_scheme -> Proof_global.t
+val make_proof : ((htyp, henv) extract_env * ident) -> Lemmas.t -> scheme_prover -> 
+                 (htyp fix_term) proof_scheme -> Lemmas.t
 
 (* Very basic correction prover. *)
 val simple_pc : scheme_prover

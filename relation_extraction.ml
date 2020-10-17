@@ -133,17 +133,17 @@ let relation_extraction_order modes =
   let ind_refs = List.map (fun (_, ind_ref, _, _) -> ind_ref) modes in
   extract_relation_miniml true true ind_refs modes
 
-let relation_extraction_fixpoint ~pstate modes =
+let relation_extraction_fixpoint modes =
   let ind_refs = List.map (fun (_, ind_ref, _, _) -> ind_ref) modes in
   let env = extract_relation_common false false ind_refs modes in
   let env = build_all_fixfuns env in
-  gen_fixpoint pstate env
+  gen_fixpoint env
 
-let relation_extraction_fixpoint_order ~pstate modes =
+let relation_extraction_fixpoint_order modes =
   let ind_refs = List.map (fun (_, ind_ref, _, _) -> ind_ref) modes in
   let env = extract_relation_common false true ind_refs modes in
   let env = build_all_fixfuns env in
-  gen_fixpoint pstate env
+  gen_fixpoint env
 
 (* DEBUG HINT: Displaying a constant idr:
 let cstr = constr_of_global (global idr) in

@@ -216,9 +216,9 @@ let pat_from_constr pstate constr =
   let evm = get_evarmap pstate in
   Patternops.pattern_of_constr (Global.env()) evm constr
 
-let get_proof_from_tac (env, id) pstate prover branch =
-  let term = get_goal pstate in
-  let sigma = get_evarmap pstate in
+let get_proof_from_tac (env, id) lemma prover branch =
+  let term = Lemmas.pf_fold get_goal lemma in
+  let sigma = Lemmas.pf_fold get_evarmap lemma in
   prover (env, id) branch sigma term
 
 let rec get_hyp_by_name hn hyps = match hyps with
@@ -244,7 +244,7 @@ let intros_until_n_wored i = Tactics.intros_until (Tactypes.AnonHyp i) (* TODO: 
 let symmetry_in id = Tactics.intros_symmetry (Locusops.onHyp id)
 let replace_in hid cstr_pat cstr = Equality.replace_in_clause_maybe_by cstr_pat cstr (Locusops.onHyp hid) None
 
-let print_subgoals pstate = Feedback.msg_notice (Printer.pr_open_subgoals ~proof:(Proof_global.give_me_the_proof pstate))
+let print_subgoals = Lemmas.pf_fold (fun lemma -> Feedback.msg_notice (Printer.pr_open_subgoals ~proof:(Proof_global.get_proof lemma)))
 
 (* Makes real Coq tactics and applies them. *)
 let rec build_tac_atom ta = match ta with
@@ -335,7 +335,7 @@ let rec build_tac_atom ta = match ta with
     Auto.default_auto
 
 (* Proves a goal, with a given prover. *)
-let make_proof (env, id) pstate prover ps =
+let make_proof (env, id) lemma prover ps =
   if debug_print_tacs then
     let (fixfun, _) = extr_get_fixfun env id in
     let fn = string_of_ident fixfun.fixfun_name in
@@ -348,24 +348,24 @@ let make_proof (env, id) pstate prover ps =
   let intro = prover.prov_intro (env, id) ps in
   let concl = prover.prov_concl (env, id) ps in
   let prover = prover.prov_branch in
-  let rec apply_tacs pstate tacs = match tacs with
+  let rec apply_tacs lemma tacs = match tacs with
     | Prop_tacs _ -> assert false
     | Tac_list (t::tl) -> 
       begin if debug_print_goals then 
         begin Printf.printf "\n\n%s\n\n" (pp_tac_atom t); 
-        print_subgoals pstate end
+        print_subgoals lemma end
       else () end;
-      let (pstate,_) = Pfedit.by (build_tac_atom t) pstate in apply_tacs pstate (Tac_list tl)
-    | Tac_list [] -> pstate in
-  let pstate = apply_tacs pstate intro in
-  let pstate = List.fold_left (fun pstate branch ->
-    if debug_print_goals then print_subgoals pstate
+      let (lemma,_) = Lemmas.by (build_tac_atom t) lemma in apply_tacs lemma (Tac_list tl)
+    | Tac_list [] -> lemma in
+  let lemma = apply_tacs lemma intro in
+  let lemma = List.fold_left (fun lemma branch ->
+    if debug_print_goals then print_subgoals lemma
     else ();
-    let proof = get_proof_from_tac (env, id) pstate prover branch in
+    let proof = get_proof_from_tac (env, id) lemma prover branch in
     let intros_tac = Tac_list [INTROS proof.pres_intros] in
     match proof.pres_tacts with
-      | Tac_list _ -> let pstate = apply_tacs pstate intros_tac in
-        apply_tacs pstate proof.pres_tacts
+      | Tac_list _ -> let lemma = apply_tacs lemma intros_tac in
+        apply_tacs lemma proof.pres_tacts
       | Prop_tacs (til, prop) -> let bint, aint, norm, apro = 
           List.fold_right (fun ti (bi, ai, n, ap) -> 
             ti.ti_before_intros::bi, ti.ti_after_intros::ai, 
@@ -375,18 +375,18 @@ let make_proof (env, id) pstate prover ps =
         let n_tac = Tac_list (List.flatten norm) in
         let ap_tac = Tac_list (List.flatten apro) in
         let prop_tac = Tac_list [APPLYPROP prop] in
-        let pstate = apply_tacs pstate bi_tac in
-        let pstate = apply_tacs pstate intros_tac in
-        let pstate = apply_tacs pstate ai_tac in
-        let pstate = apply_tacs pstate n_tac in
-        let pstate = apply_tacs pstate prop_tac in
-        apply_tacs pstate ap_tac
-  ) pstate ps.scheme_branches in
-  let pstate = apply_tacs pstate concl in
+        let lemma = apply_tacs lemma bi_tac in
+        let lemma = apply_tacs lemma intros_tac in
+        let lemma = apply_tacs lemma ai_tac in
+        let lemma = apply_tacs lemma n_tac in
+        let lemma = apply_tacs lemma prop_tac in
+        apply_tacs lemma ap_tac
+  ) lemma ps.scheme_branches in
+  let lemma = apply_tacs lemma concl in
   if debug_print_tacs then
     Printf.eprintf "Qed.\n"
   else ();
-  pstate
+  lemma
 
 
 (****************)

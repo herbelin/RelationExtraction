@@ -28,5 +28,5 @@ open Coq_stuff
 (********************)
 
 (* Try to generate the correction lemma and the associated tactical proof. *)
-val gen_correction_proof : Proof_global.t option -> (htyp, henv) extract_env -> ident -> Proof_global.t option
+val gen_correction_proof : (htyp, henv) extract_env -> ident -> unit
 

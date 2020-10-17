@@ -68,11 +68,11 @@ END
 
 
 VERNAC COMMAND EXTEND ExtractionRelationFixpoint CLASSIFIED AS SIDEFF
-| ![ proof ] [ "Extraction" "Relation" "Fixpoint" modewithrec_list(modes) ] ->
+| [ "Extraction" "Relation" "Fixpoint" modewithrec_list(modes) ] ->
   { relation_extraction_fixpoint modes }
 END
 
 VERNAC COMMAND EXTEND ExtractionRelationFixpointRelaxed CLASSIFIED AS SIDEFF
-| ![ proof ] [ "Extraction" "Relation" "Fixpoint" "Relaxed" modewithrec_list(modes) ] ->
+| [ "Extraction" "Relation" "Fixpoint" "Relaxed" modewithrec_list(modes) ] ->
   { relation_extraction_fixpoint_order modes }
 END

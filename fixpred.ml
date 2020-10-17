@@ -348,11 +348,11 @@ let rec transform_pat_constrs (lpat, ty) = match lpat with
   | MLPConstr (i, pl) -> MLPConstr (i, transform_pat_constrs_list pl), ty
   | MLPATrue -> MLPConstr (ident_of_string "true", []), 
     (CTSum [ident_of_string "true";ident_of_string "false"], 
-     Some (UnivGen.constr_of_global
+     Some (UnivGen.constr_of_monomorphic_global
        (locate (qualid_of_string "Coq.Init.Datatypes.bool"))))
   | MLPAFalse -> MLPConstr (ident_of_string "false", []), 
     (CTSum [ident_of_string "true";ident_of_string "false"], 
-      Some (UnivGen.constr_of_global
+      Some (UnivGen.constr_of_monomorphic_global
         (locate (qualid_of_string "Coq.Init.Datatypes.bool"))))
   | MLPASome p -> 
     MLPConstr (ident_of_string "Some", [transform_pat_constrs p]), ty
@@ -373,11 +373,11 @@ let rec transform_constrs (lterm, ty) = match lterm with
       transform_pat_constrs p, transform_constrs t, an) ptl), ty
   | MLTATrue -> MLTConstr (ident_of_string "true", []), 
     (CTSum [ident_of_string "true";ident_of_string "false"], 
-      Some (UnivGen.constr_of_global
+      Some (UnivGen.constr_of_monomorphic_global
         (locate (qualid_of_string "Coq.Init.Datatypes.bool"))))
   | MLTAFalse -> MLTConstr (ident_of_string "false", []), 
     (CTSum [ident_of_string "true";ident_of_string "false"], 
-      Some (UnivGen.constr_of_global
+      Some (UnivGen.constr_of_monomorphic_global
         (locate (qualid_of_string "Coq.Init.Datatypes.bool"))))
   | MLTASome t -> MLTConstr (ident_of_string "Some", [transform_constrs t]), ty
   | MLTANone -> MLTConstr (ident_of_string "None", []), ty
@@ -387,13 +387,13 @@ and transform_constrs_list lterm_list =
 
 (* We must add this constructors: true, false, Some, None *)
 let add_standard_constr_to_spec env = 
-  let true_cstr = UnivGen.constr_of_global
+  let true_cstr = UnivGen.constr_of_monomorphic_global
     (locate (qualid_of_string "Coq.Init.Datatypes.true"))
-  and false_cstr = UnivGen.constr_of_global
+  and false_cstr = UnivGen.constr_of_monomorphic_global
     (locate (qualid_of_string "Coq.Init.Datatypes.false"))
-  and some_cstr = UnivGen.constr_of_global
+  and some_cstr = UnivGen.constr_of_monomorphic_global
     (locate (qualid_of_string "Coq.Init.Datatypes.Some"))
-  and none_cstr = UnivGen.constr_of_global
+  and none_cstr = UnivGen.constr_of_monomorphic_global
     (locate (qualid_of_string "Coq.Init.Datatypes.None"))
   in 
 let henv = { env.extr_henv with cstrs =
@@ -408,7 +408,7 @@ let complete_fun_with_option env f =
     | MLTVar _ | MLTTuple _ | MLTRecord _ | MLTConstr _ | MLTConst _ | MLTFun _ 
     | MLTFunNot _ | MLTATrue | MLTAFalse | MLTASome _ | MLTANone -> 
       if fix_get_completion_status env f.mlfun_name then
-        let opt = UnivGen.constr_of_global
+        let opt = UnivGen.constr_of_monomorphic_global
           (locate (qualid_of_string "Coq.Init.Datatypes.option")) in
         match ty with
         | _, Some ctyp ->
@@ -421,7 +421,7 @@ let complete_fun_with_option env f =
     | MLTMatch ((MLTFun(i,args,m), (_,Some ctyp)), an, ptl) 
     when fix_get_completion_status env i -> 
 
-     let opt = UnivGen.constr_of_global
+     let opt = UnivGen.constr_of_monomorphic_global
        (locate (qualid_of_string "Coq.Init.Datatypes.option")) in
      let ctyp = Some (mkApp (opt, [|ctyp|])) in
      let typ = (CTSum [ident_of_string "Some";ident_of_string "None"], ctyp) in
@@ -437,9 +437,9 @@ let complete_fun_with_option env f =
 
 (* Generates a Coq natural number. *)
 let rec _gen_coq_nat n = if n = 0 then
-    UnivGen.constr_of_global (locate (qualid_of_string "Coq.Init.Datatypes.O"))
+    UnivGen.constr_of_monomorphic_global (locate (qualid_of_string "Coq.Init.Datatypes.O"))
   else
-    let s = UnivGen.constr_of_global
+    let s = UnivGen.constr_of_monomorphic_global
       (locate (qualid_of_string "Coq.Init.Datatypes.S")) in
     mkApp (s, [|_gen_coq_nat (n-1)|])
 
@@ -449,7 +449,7 @@ let rec _gen_coq_nat n = if n = 0 then
 let add_ml_counter env f = 
   let fname = f.mlfun_name in
   let (mlt, typ) = f.mlfun_body in
-  let coq_nat = Some (UnivGen.constr_of_global
+  let coq_nat = Some (UnivGen.constr_of_monomorphic_global
       (locate (qualid_of_string "Coq.Init.Datatypes.nat"))) in
   let nat_typ = CTSum [ident_of_string "O"; ident_of_string "S"], coq_nat in
   let fcount = MLTVar (ident_of_string "fcounter"), nat_typ in

@@ -32,7 +32,6 @@ open Names
 open Declarations
 open Libnames
 open Nametab
-open Decl_kinds
 open Util
 open Pp
 
@@ -159,7 +158,7 @@ let gen_fix_type (env,id) args =
 
 
 (* Generates and registers Coq Fixpoints. *)
-let gen_fixpoint pstate env =
+let gen_fixpoint env =
   let glbs = List.map (fun (i, (f, _)) ->
     let (fn, args, t) = f.fixfun_name, f.fixfun_args, f.fixfun_body in
     let c = gen_constr (env,i) fn (List.rev args) t in
@@ -175,8 +174,8 @@ let gen_fixpoint pstate env =
       | _ -> ([|0|], 0), recdec in
     let f = mkFix fi in
     let univs = Entries.Monomorphic_entry (Univ.ContextSet.empty) in (* ?? *)
-    let f = Safe_typing.mk_pure_proof f in
-    DeclareDef.declare_fix ~ontop:None (Global,false,Fixpoint) UnivNames.empty_binders univs (Id.of_string (string_of_ident fn)) f ty []
+    let f = (f, Univ.ContextSet.empty), Evd.empty_side_effects in
+    DeclareDef.(declare_fix ~scope:(Global Declare.ImportDefaultBehavior) ~kind:Decls.Fixpoint UnivNames.empty_binders univs ~name:(Id.of_string (string_of_ident fn)) f ty [])
   ) env.extr_fixfuns in 
   let glb = List.hd glbs in
   if Global.is_polymorphic glb then CErrors.user_err (str "Polymorphic references not supported.");
@@ -188,7 +187,7 @@ let gen_fixpoint pstate env =
   | _ -> () (* ?? *) in
 
   (* Proofs generation *)
-  List.fold_left (fun pstate (id, _) -> gen_correction_proof pstate env id) 
-    pstate env.extr_fixfuns
+  List.iter (fun (id, _) -> gen_correction_proof env id) 
+    env.extr_fixfuns
 
 

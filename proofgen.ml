@@ -31,17 +31,16 @@ open Coq_stuff
 open Minimlgen
 open Reltacs
 
-let build_ind_scheme pstate fun_name =
+let build_ind_scheme fun_name =
   let ref_func = 
     qualid_of_ident (Id.of_string fun_name) in
   let make_fscheme () =
-    Recdef_plugin.Functional_principles_types.build_scheme
+    Recdef_plugin.Gen_principle.build_scheme
       [Id.of_string (fun_name ^ "_ind"), ref_func,
        Sorts.InProp] in
-  try make_fscheme (); pstate with Recdef_plugin.Functional_principles_types.No_graph_found ->
-    let pstate = Recdef_plugin.Indfun.make_graph ~pstate (Nametab.global ref_func) in
-    make_fscheme ();
-    pstate
+  try make_fscheme () with Recdef_plugin.Gen_principle.No_graph_found ->
+    let () = Recdef_plugin.Gen_principle.make_graph (Nametab.global ref_func) in
+    make_fscheme ()
 
 
 let build_correct_lemma env id fixfun =
@@ -82,27 +81,27 @@ let build_correct_lemma env id fixfun =
   ) in_names in_types cstr in
   cstr, in_names, out_name
 
-let gen_correction_proof pstate env id =
+let gen_correction_proof env id =
   let (fixfun, ps) = extr_get_fixfun env id in
   let mode = List.hd (extr_get_modes env id) in
   let compl = fix_get_completion_status env fixfun.fixfun_name in
   let full = is_full_extraction mode in
 
   (* functional scheme *)
-  let pstate = build_ind_scheme pstate (string_of_ident fixfun.fixfun_name) in
+  let pstate = build_ind_scheme (string_of_ident fixfun.fixfun_name) in
   
   (* Lemma building *)
   let cstr, in_names, out_name = build_correct_lemma env id fixfun in
 
   (* Proof registering *)
   let proof_register pstate prover ps =
-    let pstate = Lemmas.start_proof ~ontop:pstate
-      (Id.of_string (string_of_ident fixfun.fixfun_name ^ "_correct"))
-      (Decl_kinds.Global, false, Decl_kinds.Proof (Decl_kinds.Lemma))
+    let lemma = Lemmas.start_lemma
+      ~name:(Id.of_string (string_of_ident fixfun.fixfun_name ^ "_correct"))
+      ~poly:false
       (Evd.from_env (Global.env())) (EConstr.of_constr cstr)
       (*~init_tac:tac_name*) in
-    let pstate = make_proof (env, id) pstate prover ps in
-    Lemmas.save_proof_proved ~pstate ?proof:None ~opaque:Proof_global.Transparent ~idopt:None in
+    let lemma = make_proof (env, id) lemma prover ps in
+    Lemmas.save_lemma_proved ~lemma ~opaque:Proof_global.Transparent ~idopt:None in
 
   let _ind_scheme = (string_of_ident fixfun.fixfun_name ^ "_ind") in
 

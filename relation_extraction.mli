@@ -43,11 +43,9 @@ val relation_extraction_order :
 
 (* Extraction of one or more relations into Fixpoints. *)
 val relation_extraction_fixpoint :
-pstate:Proof_global.t option ->
 (string option * Libnames.qualid * int list * recursion_style option) list
--> Proof_global.t option
+-> unit
 
 val relation_extraction_fixpoint_order :
-pstate:Proof_global.t option ->
 (string option * Libnames.qualid * int list * recursion_style option) list
--> Proof_global.t option
+-> unit
